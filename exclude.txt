@@ -1,0 +1,31 @@
+Data/AGGREGATED_RGB_IMAGES
+Data/AUGMENTED_SOURCES
+Data/DATA_RESULTS
+Data/ML_RESULTS
+Data/RADCAT_F_UNPACKED
+Data/SPLIT_SOURCES
+Data/TRAINING AND VALIDATION
+Data/TESTING
+Data/NUMPY_SOURCES
+Data/DATA_SOURCES
+__pycache__/
+.vscode/
+*.zip
+FARGE_CODE/
+.venv/
+.git
+.gitignore
+Results_Run1/
+Results/
+DATARESULTS_GENERALIZATION
+DATARESULTS/
+Models/
+.gitignore
+'readme template.txt'
+readme.txt
+requirements.txt
+Acceleration/
+Experiment_1_Original/
+Training/
+
+

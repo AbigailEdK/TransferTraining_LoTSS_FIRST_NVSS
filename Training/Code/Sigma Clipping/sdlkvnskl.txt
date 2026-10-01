@@ -1,0 +1,39 @@
+Running experiment 1/4 (['FIRST'] dataset) with learning rate 0.00039 and regularisation 0.4
+Formatted directory: /home/25860194/DeKlerk_Models/Results/Experiment_1/Training/modelFIRS_setFIRS_20e_0.00039l_0.4r/
+
+Selected surveys: ['FIRST']
+Corresponding channels: [0]
+Loading images for ['FIRST']...
+
+Finding data for Experiment 1 in /home/25860194/DeKlerk_Models/Results/Experiment_1/Data...
+Selected surveys: ['FIRST']
+Corresponding channels: [0]
+Loading images for ['FIRST']...
+Finding data for Experiment 1 in /home/25860194/DeKlerk_Models/Results/Experiment_1/Data...
+
+
+
+
+
+
+
+
+
+
+
+
+Running experiment 1/4 (['RADCAT'] dataset) with learning rate 0.00039 and regularisation 0.54
+Formatted directory: /home/25860194/DeKlerk_Models/Results/Experiment_1/Training/modelRADC_setRADC_20e_0.00039l_0.54r/
+
+Selected surveys: ['RADCAT']
+Corresponding channels: [[0, 1, 2]]
+Loading images for ['RADCAT']...
+
+Finding data for Experiment 1 in /home/25860194/DeKlerk_Models/Results/Experiment_1/Data...
+Selected surveys: ['RADCAT']
+Corresponding channels: [[0, 1, 2]]
+Loading images for ['RADCAT']...
+Finding data for Experiment 1 in /home/25860194/DeKlerk_Models/Results/Experiment_1/Data...
+
+
+return [v for k,v in channel_map.items() if k in surveys]

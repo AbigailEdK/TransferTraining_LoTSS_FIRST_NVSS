@@ -1,0 +1,32 @@
+# Virtual environments
+.venv/
+.vscode/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Logs and data
+*.log
+*.csv
+*.npy
+*.fits
+*.png
+
+# ML / model files
+*.h5
+*.keras
+*.pt
+*.pth
+
+# Archives
+*.zip
+*.tar
+
+# Project-specific folders
+*/Data
+*augmentations.txt
+/Results
+/Results*
+*/Results*
+*Experiment_1/
