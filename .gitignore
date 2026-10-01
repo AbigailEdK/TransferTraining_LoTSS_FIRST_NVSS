@@ -24,9 +24,14 @@ __pycache__/
 *.tar
 
 # Project-specific folders
-*/Data
+Data
 *augmentations.txt
 /Results
 /Results*
 */Results*
 *Experiment_1/
+
+# SSH nonsense
+/exclude.txt
+/excludefromcluster.txt
+/excludefromPC.txt
