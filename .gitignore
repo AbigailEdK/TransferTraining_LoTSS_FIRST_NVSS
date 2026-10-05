@@ -24,7 +24,7 @@ __pycache__/
 *.tar
 
 # Project-specific folders
-Data
+Data/
 *augmentations.txt
 /Results
 /Results*

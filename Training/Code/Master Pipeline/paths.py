@@ -1,7 +1,7 @@
 import os
 
 HOME_DIR = os.path.expanduser("~")
-HOME_DIR = os.path.join(HOME_DIR, "Desktop") 
+# HOME_DIR = os.path.join(HOME_DIR, "Desktop") # ! UNCOMMENT THIS FOR LOCAL USE
 PROJECT_ROOT = os.path.join(HOME_DIR, "MNRAS_Paper_Code", "Training")
 DATA_ROOT = os.path.dirname(PROJECT_ROOT)
 MANAGER = os.path.join(PROJECT_ROOT, "Code", "Master Pipeline", "masterManager.py")

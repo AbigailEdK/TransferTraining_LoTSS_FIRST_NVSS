@@ -9,6 +9,7 @@
 import os
 import tensorflow as tensorflow
 from tensorflow.python.framework import ops
+from time import perf_counter
 
 gpus = tensorflow.config.list_physical_devices('GPU')
 if gpus:
@@ -176,6 +177,7 @@ def run_experiment(X_train_val, y_train_val, X_test, names_train_val, folds, cf)
             verbose=1
         )
 
+        training_start = perf_counter()
         loss = model.fit(
             X_train, encoded_y_train,
             validation_data=(X_val, encoded_y_val),
@@ -183,6 +185,7 @@ def run_experiment(X_train_val, y_train_val, X_test, names_train_val, folds, cf)
             batch_size=BATCH_SIZE,
             callbacks=[early_stopping]
         ).history
+        training_time_seconds = perf_counter() - training_start
 
         best_epoch = int(np.argmin(loss['val_loss'])) + 1
         best_epochs.append(best_epoch)
@@ -197,6 +200,7 @@ def run_experiment(X_train_val, y_train_val, X_test, names_train_val, folds, cf)
 
         print(f"\n\nSaving training history and fold tracking metadata...\n")
         np.save(f"{cf.SAVE_DIR}/loss_fold_{kfold+1}", loss)
+        np.save(f"{cf.SAVE_DIR}/training_time_fold_{kfold+1}", training_time_seconds)
         np.save(f"{cf.SAVE_DIR}/names_train_fold_{kfold+1}", names_train)
         np.save(f"{cf.SAVE_DIR}/names_val_fold_{kfold+1}", names_val)
 

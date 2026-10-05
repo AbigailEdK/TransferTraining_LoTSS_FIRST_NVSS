@@ -26,6 +26,5 @@ readme.txt
 requirements.txt
 Acceleration/
 Experiment_1_Original/
-Training/
 
 
