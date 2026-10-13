@@ -10,7 +10,7 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.patches import Rectangle
+from matplotlib.patches import Patch, Rectangle
 from sklearn.metrics import (
 	accuracy_score,
 	auc,
@@ -21,6 +21,16 @@ from sklearn.metrics import (
 	roc_curve,
 )
 
+
+# Default title/legend sizes (12 / 10 pt) doubled.
+plt.rcParams.update({
+	"axes.titlesize": 24,
+	"figure.titlesize": 24,
+	"legend.fontsize": 20,
+	"axes.labelsize": 20,
+	"xtick.labelsize": 20,
+	"ytick.labelsize": 20,
+})
 
 PROJECT_DIR = Path(__file__).resolve().parent
 EXPERIMENT_DIR = PROJECT_DIR / "Training" / "Results" / "Experiment_0"
@@ -204,6 +214,15 @@ def build_model_summary_rows(fold_rows, metric_names):
 	return rows
 
 
+def training_run_title(folder_name):
+	"""Format a training folder name as 'BASE->FINE_TUNED: TEST'."""
+	match = TESTING_FOLDER_PATTERN.match(folder_name)
+	if match is None:
+		return folder_name
+	base, target, test_dataset = (DATASET_LABELS.get(name, name) for name in match.groups())
+	return f"{base}->{target}: {test_dataset}"
+
+
 def plot_accuracy_curves(runs):
 	models = sorted({run["model"] for run in runs})
 	for model in models:
@@ -244,7 +263,7 @@ def plot_accuracy_curves(runs):
 				linewidth=0,
 			)
 
-		axis.set_title(f"{model}\nExperiment_0")
+		axis.set_title(training_run_title(model))
 		axis.set_xlabel("Epoch")
 		axis.set_ylabel("Accuracy")
 		axis.set_ylim(0, 1)
@@ -298,7 +317,7 @@ def plot_fold_curves(runs):
 		if not handles:
 			handles, labels = flat_axes[1].get_legend_handles_labels()
 		fig.legend(handles, labels, loc="lower center", ncol=len(labels), frameon=False)
-		fig.suptitle(f"{model}\nExperiment_0 - performance per fold")
+		fig.suptitle(training_run_title(model))
 		fig.tight_layout(rect=(0, 0.04, 1, 0.95))
 		safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", model)
 		save_figure(fig, FOLD_CURVE_DIR / f"{safe_name}_folds.png")
@@ -410,16 +429,16 @@ def plot_metric_heatmaps(test_rows):
 	for axis, (metric, title) in zip(axes.ravel(), HEATMAP_METRICS):
 		grid = grids[metric]
 		image = axis.imshow(np.ma.masked_invalid(grid), cmap="viridis", vmin=0, vmax=1, aspect="auto")
-		axis.set_xticks(range(len(columns)), columns)
-		axis.set_yticks(range(len(models)), models)
-		axis.set_xlabel("Test dataset")
+		axis.set_xticks(range(len(columns)), columns, fontsize=10)
+		axis.set_yticks(range(len(models)), models, fontsize=10)
+		axis.set_xlabel("Test dataset", fontsize=10)
 		axis.set_title(title)
 		for i in range(len(models)):
 			for j in range(len(columns)):
 				if not np.isnan(grid[i, j]):
 					axis.text(
 						j, i, f"{grid[i, j]:.3f}", ha="center", va="center",
-						color="white" if grid[i, j] < 0.6 else "black", fontsize=8,
+						color="white" if grid[i, j] < 0.6 else "black", fontsize=14,
 					)
 		axis.axvline(len(datasets) - 0.5, color="white", linewidth=2)
 		for column_index, color, inset in ((-2, "blue", 0.08), (-1, "red", 0.0)):
@@ -432,13 +451,45 @@ def plot_metric_heatmaps(test_rows):
 				fill=False, edgecolor=color, linewidth=3, clip_on=False,
 			))
 		fig.colorbar(image, ax=axis, fraction=0.046, pad=0.04)
-	fig.suptitle(
-		"Experiment_0 - test metrics averaged across folds\n"
-		"Weighted = 0.45 FIRST + 0.45 LoTSS + 0.10 NVSS (red); "
-		"Average = equal weights (blue)"
-	)
+	fig.suptitle("Test metrics")
 	fig.tight_layout(rect=(0, 0, 1, 0.95))
 	save_figure(fig, HEATMAP_DIR / "test_metric_heatmaps.png")
+	plt.close(fig)
+
+
+def plot_plain_metric_heatmaps(test_rows):
+	"""Heatmaps of fold-mean test metrics per dataset only: no Average/Weighted scores, no highlighting."""
+	models = sorted({row["model"] for row in test_rows})
+	datasets = sorted({row["test_dataset"] for row in test_rows})
+	fig, axes = plt.subplots(
+		2, 2, figsize=(5 + 2.2 * len(datasets), 2.5 + 0.55 * len(models) * 2), squeeze=False
+	)
+	for axis, (metric, title) in zip(axes.ravel(), HEATMAP_METRICS):
+		grid = np.full((len(models), len(datasets)), np.nan)
+		for i, model in enumerate(models):
+			for j, dataset in enumerate(datasets):
+				values = [
+					row[metric] for row in test_rows
+					if row["model"] == model and row["test_dataset"] == dataset
+				]
+				if values and not np.all(np.isnan(values)):
+					grid[i, j] = np.nanmean(values)
+		image = axis.imshow(np.ma.masked_invalid(grid), cmap="viridis", vmin=0, vmax=1, aspect="auto")
+		axis.set_xticks(range(len(datasets)), datasets, fontsize=10)
+		axis.set_yticks(range(len(models)), models, fontsize=10)
+		axis.set_xlabel("Test dataset", fontsize=10)
+		axis.set_title(title)
+		for i in range(len(models)):
+			for j in range(len(datasets)):
+				if not np.isnan(grid[i, j]):
+					axis.text(
+						j, i, f"{grid[i, j]:.3f}", ha="center", va="center",
+						color="white" if grid[i, j] < 0.6 else "black", fontsize=14,
+					)
+		fig.colorbar(image, ax=axis, fraction=0.046, pad=0.04)
+	fig.suptitle("Test metrics")
+	fig.tight_layout(rect=(0, 0, 1, 0.95))
+	save_figure(fig, HEATMAP_DIR / "test_metric_heatmaps_plain.png")
 	plt.close(fig)
 
 
@@ -522,23 +573,25 @@ def plot_roc_curves():
 			axis.plot([0, 1], [0, 1], color="grey", linestyle=":", label="Chance")
 			axis.set_xlim(0, 1)
 			axis.set_ylim(0, 1.02)
-			axis.set_xlabel("False positive rate")
-			axis.set_ylabel("True positive rate")
+			axis.set_xlabel("False positive rate", fontsize=16)
+			axis.set_ylabel("True positive rate", fontsize=16)
+			axis.tick_params(labelsize=16)
 			axis.set_title(f"Test: {dataset}")
 			axis.grid(alpha=0.25)
 			axis.legend(loc="lower right", frameon=False, fontsize=8)
-		fig.suptitle(f"{model} - ROC curves (mean ± std over folds)")
+		fig.suptitle(f"{model} - ROC curves")
 		fig.tight_layout(rect=(0, 0, 1, 0.94))
 		safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", model)
 		save_figure(fig, ROC_DIR / f"{safe_name}_roc.png")
 		plt.close(fig)
 
 
+SILVER = (0.95, 0.95, 0.95)  # matches \definecolor{Silver}{rgb}{0.87,0.87,0.87}
 BUBBLE_METRICS = [
-	("recall", "Recall", "#fdf0ee"),
-	("precision", "Precision", "#f8f1f8"),
-	("f1", "F1", "#f0f0fd"),
-	("auc", "AUC", "#eef8f0"),
+	("recall", "Recall", SILVER),
+	("precision", "Precision", "white"),
+	("f1", "F1", SILVER),
+	("auc", "AUC", "white"),
 ]
 BUBBLE_CLASS_LABELS = {"FRI": "FR I", "FRII": "FR II", "COMPACT": "Compact"}
 
@@ -568,6 +621,8 @@ def load_per_class_metrics():
 			precision, recall, f1, _ = precision_recall_fscore_support(
 				y_true, y_pred, labels=labels, zero_division=0
 			)
+			# Precision is undefined (0/0) for a class that is never predicted.
+			precision = np.where(np.bincount(y_pred, minlength=len(labels)) == 0, np.nan, precision)
 			aucs = []
 			for index in labels:
 				positives = y_true == index
@@ -615,7 +670,6 @@ def plot_bubble_summaries(best_models=None, output_dir=BUBBLE_DIR):
 	palette = plt.cm.tab10.colors[1:]
 
 	for test_dataset in test_datasets:
-		baseline = metrics.get((f"NONE->{test_dataset}", test_dataset))
 		# From-scratch (NONE->) models are listed first, followed by the transfer models.
 		transfer = {
 			model: values for (model, dataset), values in sorted(
@@ -633,7 +687,7 @@ def plot_bubble_summaries(best_models=None, output_dir=BUBBLE_DIR):
 			figsize=(3.2 * len(BUBBLE_METRICS) + 1, 2.6 * len(CLASSES) + 1.6),
 			squeeze=False,
 		)
-		fig.subplots_adjust(left=0.08, right=0.98, top=0.9, bottom=0.17, wspace=0.12, hspace=0.25)
+		fig.subplots_adjust(left=0.18, right=0.98, top=0.9, bottom=0.27, wspace=0.3, hspace=0.25)
 		for row, class_name in enumerate(CLASSES):
 			for col, (_, metric_title, background) in enumerate(BUBBLE_METRICS):
 				axis = axes[row, col]
@@ -641,13 +695,18 @@ def plot_bubble_summaries(best_models=None, output_dir=BUBBLE_DIR):
 				axis.set_xlim(0, 1)
 				axis.set_ylim(len(model_names) + 0.4, -0.9)
 				axis.set_yticks([])
-				axis.set_xticks(np.arange(0, 1.01, 0.25))
-				axis.tick_params(labelsize=8)
+				axis.set_xticks([0, 0.5, 1.0])
+				axis.tick_params(labelsize=18)
 				axis_width_pts = axis.get_position().width * fig.get_figwidth() * 72
-				if baseline is not None:
-					value = np.nanmean(baseline[:, row, col])
+				for model in model_names:
+					if not model.startswith("NONE->"):
+						continue
+					value = np.nanmean(transfer[model][:, row, col])
 					if not np.isnan(value):
-						axis.axvline(value, color="#1f77b4", linestyle=":", linewidth=2)
+						axis.axvline(
+							value, color=colors[model], zorder=1, linewidth=2,
+							linestyle="--" if model == f"NONE->{test_dataset}" else ":",
+						)
 				for index, model in enumerate(model_names):
 					values = transfer[model][:, row, col]
 					mean, std = np.nanmean(values), np.nanstd(values)
@@ -668,28 +727,29 @@ def plot_bubble_summaries(best_models=None, output_dir=BUBBLE_DIR):
 				axis.plot([0.05, 0.15], [-0.6, -0.6], color="black", linewidth=1.2)
 				axis.text(0.1, -0.35, "0.1", ha="center", va="center", fontsize=7)
 				if row == 0:
-					axis.set_title(metric_title, fontsize=11)
+					axis.set_title(metric_title, fontsize=22)
 				if col == 0:
 					axis.set_ylabel(BUBBLE_CLASS_LABELS.get(class_name, class_name),
-									rotation=0, labelpad=26, va="center", fontsize=11)
+									rotation=0, labelpad=60, va="center", fontsize=18)
 
 		handles = [
 			plt.Line2D([], [], marker="o", linestyle="", color=colors[model], label=model, markersize=8)
 			for model in model_names
 		]
-		handles.append(plt.Line2D([], [], color="#1f77b4", linestyle=":", linewidth=2,
-								  label=f"NONE->{test_dataset} (baseline)"))
+		for model in model_names:
+			if model.startswith("NONE->"):
+				own = model == f"NONE->{test_dataset}"
+				handles.append(plt.Line2D(
+					[], [], color=colors[model], linestyle="--" if own else ":", linewidth=2,
+					label=f"{model} mean",
+				))
 		for key, (ring_color, _, ring_label) in ring_styles.items():
 			if best_models.get(key) in model_names:
 				handles.append(plt.Line2D([], [], marker="o", linestyle="", markerfacecolor="none",
 										  markeredgecolor=ring_color, markeredgewidth=2, markersize=10,
 										  label=f"{ring_label}: {best_models[key]}"))
-		fig.legend(handles=handles, loc="lower center", ncol=min(len(handles), 4), frameon=True, fontsize=9)
-		fig.suptitle(
-			f"Metric evaluation (test input: {test_dataset})\n"
-			"Bubble centre = fold mean, bubble diameter = 2 x std across folds (bar = 0.1)",
-			fontsize=12,
-		)
+		fig.legend(handles=handles, loc="lower center", ncol=3, frameon=True, fontsize=18)
+		fig.suptitle(f"Metric evaluation (test input: {test_dataset})", fontsize=24)
 		save_figure(fig, output_dir / f"bubble_metrics_test_{test_dataset}.png")
 		plt.close(fig)
 
@@ -720,21 +780,139 @@ TANG_RESULTS = {
 	("NVSS->FIRST", "NVSS"): _tang(0.503, 0.59),
 }
 
+# Standard deviations of the Tang et al. per-class metrics (Method 0 transfer models), estimated from
+# the bubble radii in Tang Fig 3.9 / 3.10 (radius = std; 0.1 scale bar = 0.1 on the axis). Accurate to ~0.01;
+# the smallest bubbles sit inside the marker and are given as ~0.01-0.02. AUC is not shown per class.
+TANG_STD = {
+	("FIRST->NVSS", "NVSS"): {
+		"FRI": {"recall": 0.01, "precision": 0.01, "f1": 0.01},
+		"FRII": {"recall": 0.035, "precision": 0.03, "f1": 0.045},
+	},
+	("NVSS->FIRST", "FIRST"): {
+		"FRI": {"recall": 0.02, "precision": 0.02, "f1": 0.04},
+		"FRII": {"recall": 0.04, "precision": 0.04, "f1": 0.06},
+	},
+}
+
 # (test dataset, models to compare, include Tang et al.). LoTSS was not tested by Tang et al.
 BAR_GRAPH_SETS = [
-	("NVSS", ["NONE->NVSS", "FIRST->NVSS"], True),
-	("FIRST", ["NONE->FIRST", "NVSS->FIRST"], True),
+	("NVSS", ["NONE->FIRST", "NVSS->FIRST", "NONE->NVSS", "FIRST->NVSS"], True),
+	("FIRST", ["NONE->FIRST", "NVSS->FIRST", "NONE->NVSS", "FIRST->NVSS"], True),
 	("LoTSS", ["NONE->LoTSS", "FIRST->LoTSS", "NVSS->LoTSS"], False),
 ]
 
 
-def plot_bar_graphs(test_rows):
-	"""Grouped bar graphs of all metrics, models interleaved per metric, optionally with Tang et al."""
+TANG_BUBBLE_MODELS = ["NONE->FIRST", "NVSS->FIRST", "NONE->NVSS", "FIRST->NVSS"]
+
+
+def plot_tang_bubble_summaries(output_dir=BUBBLE_DIR):
+	"""Bubble plots per test dataset comparing this work (mean +/- std bubbles) with Tang et al. (diamonds)."""
+	metrics = load_per_class_metrics()
+	palette = plt.cm.tab10.colors[1:]
+	colors = {model: palette[i] for i, model in enumerate(TANG_BUBBLE_MODELS)}
+	for test_dataset in ("FIRST", "NVSS"):
+		models = [m for m in TANG_BUBBLE_MODELS if (m, test_dataset) in metrics]
+		if not models:
+			continue
+		n = len(models)
+		fig, axes = plt.subplots(
+			len(CLASSES), len(BUBBLE_METRICS),
+			figsize=(3.2 * len(BUBBLE_METRICS) + 1, 2.6 * len(CLASSES) + 1.6), squeeze=False,
+		)
+		fig.subplots_adjust(left=0.18, right=0.98, top=0.9, bottom=0.27, wspace=0.3, hspace=0.25)
+		for row, class_name in enumerate(CLASSES):
+			for col, (metric_key, metric_title, background) in enumerate(BUBBLE_METRICS):
+				axis = axes[row, col]
+				axis.set_facecolor(background)
+				axis.set_xlim(0, 1)
+				axis.set_ylim(2 * n + 0.4, -0.9)
+				axis.set_yticks([])
+				axis.set_xticks([0, 0.5, 1.0])
+				axis.tick_params(labelsize=18)
+				for model in models:
+					if not model.startswith("NONE->"):
+						continue
+					own_mean = np.nanmean(metrics[(model, test_dataset)][:, row, col])
+					scores = TANG_RESULTS.get((model, test_dataset))
+					tang_value = scores["classes"].get(class_name, {}).get(metric_key) if scores else None
+					for line_value in (own_mean, tang_value):
+						if line_value is not None and not np.isnan(line_value):
+							axis.axvline(line_value, color=colors[model], linestyle=":", linewidth=0.8, zorder=1)
+				axis_width_pts = axis.get_position().width * fig.get_figwidth() * 72
+				for index, model in enumerate(models):
+					values = metrics[(model, test_dataset)][:, row, col]
+					mean, std = np.nanmean(values), np.nanstd(values)
+					if not np.isnan(mean):
+						diameter_pts = max(2 * std * axis_width_pts, 0)
+						if diameter_pts > 0:
+							axis.scatter(mean, index, s=diameter_pts ** 2, color=colors[model], alpha=0.3,
+										 edgecolors=colors[model], linewidths=1, zorder=2)
+						axis.scatter(mean, index, s=22, color=colors[model], edgecolors="black",
+									 linewidths=0.4, zorder=3)
+					scores = TANG_RESULTS.get((model, test_dataset))
+					tang = scores["classes"].get(class_name, {}).get(metric_key) if scores else None
+					if tang is not None:
+						tang_std = TANG_STD.get((model, test_dataset), {}).get(class_name, {}).get(metric_key)
+						if tang_std:
+							axis.scatter(tang, n + index, s=(2 * tang_std * axis_width_pts) ** 2, color=colors[model],
+										 alpha=0.3, edgecolors=colors[model], linewidths=1, zorder=2)
+						axis.scatter(tang, n + index, s=40, marker="D", color=colors[model],
+									 edgecolors="black", linewidths=0.6, zorder=3)
+				axis.plot([0.05, 0.15], [-0.6, -0.6], color="black", linewidth=1.2)
+				axis.text(0.1, -0.35, "0.1", ha="center", va="center", fontsize=7)
+				if row == 0:
+					axis.set_title(metric_title, fontsize=22)
+				if col == 0:
+					axis.set_ylabel(BUBBLE_CLASS_LABELS.get(class_name, class_name),
+									rotation=0, labelpad=60, va="center", fontsize=18)
+		handles = [
+			plt.Line2D([], [], marker="o", linestyle="", color=colors[m], label=f"{m} (this work)", markersize=8)
+			for m in models
+		] + [
+			plt.Line2D([], [], marker="D", linestyle="", color=colors[m], markeredgecolor="black",
+					   label=f"{m} (Tang et al.)", markersize=7)
+			for m in models
+		]
+		fig.legend(handles=handles, loc="lower center", ncol=2, frameon=True, fontsize=16)
+		fig.suptitle(f"This work vs Tang et al. (test input: {test_dataset})", fontsize=24)
+		save_figure(fig, output_dir / f"bubble_metrics_tang_comparison_{test_dataset}.png")
+		plt.close(fig)
+
+
+LOTSS_FIRST_BAR_SETS = [
+	("FIRST", ["NONE->FIRST", "LoTSS->FIRST", "NONE->LoTSS", "FIRST->LoTSS"], False),
+	("LoTSS", ["NONE->FIRST", "LoTSS->FIRST", "NONE->LoTSS", "FIRST->LoTSS"], False),
+]
+LOTSS_NVSS_BAR_SETS = [
+	("NVSS", ["NONE->NVSS", "LoTSS->NVSS", "NONE->LoTSS", "NVSS->LoTSS"], False),
+	("LoTSS", ["NONE->NVSS", "LoTSS->NVSS", "NONE->LoTSS", "NVSS->LoTSS"], False),
+]
+FIRST_NVSS_BAR_SETS = [
+	("FIRST", ["NONE->FIRST", "NVSS->FIRST", "NONE->NVSS", "FIRST->NVSS"], False),
+	("NVSS", ["NONE->FIRST", "NVSS->FIRST", "NONE->NVSS", "FIRST->NVSS"], False),
+]
+# (graph sets, combined single-figure file name)
+PAIRED_BAR_GRAPHS = [
+	(LOTSS_FIRST_BAR_SETS, "bar_metrics_lotss_first_combined.png"),
+	(LOTSS_NVSS_BAR_SETS, "bar_metrics_lotss_nvss_combined.png"),
+	(FIRST_NVSS_BAR_SETS, "bar_metrics_first_nvss_combined.png"),
+]
+
+
+def plot_paired_bar_graphs(test_rows):
+	for graph_sets, combined_name in PAIRED_BAR_GRAPHS:
+		plot_bar_graphs(test_rows, graph_sets, combined_name=combined_name)
+
+
+def plot_bar_graphs(test_rows, graph_sets=BAR_GRAPH_SETS, file_prefix="bar_metrics_test_", combined_name=None):
+	"""Grouped bar graphs of all metrics, models interleaved per metric, optionally with Tang et al.
+
+	With combined_name, all test sets are stacked as separate panels of one figure sharing a legend."""
 	metrics = load_per_class_metrics()
 	if not metrics:
 		return
 
-	# Each group: (label, own fold values getter, Tang et al. value getter, section id for separators)
+	# Each group: (label, own getter, Tang getter, section id for separators, Tang value inferred from figures)
 	groups = []
 	for class_index, class_name in enumerate(CLASSES):
 		for metric_index, (metric_key, metric_title, _) in enumerate(BUBBLE_METRICS):
@@ -743,6 +921,7 @@ def plot_bar_graphs(test_rows):
 				lambda model, dataset, c=class_index, m=metric_index: metrics[(model, dataset)][:, c, m],
 				lambda scores, c=class_name, k=metric_key: scores["classes"].get(c, {}).get(k),
 				class_index,
+				True,
 			))
 	for key, paper_key, title in (("accuracy", "accuracy", "Accuracy"), ("roc_auc", "auc", "AUC\n(macro)")):
 		groups.append((
@@ -753,24 +932,40 @@ def plot_bar_graphs(test_rows):
 			], dtype=float),
 			lambda scores, k=paper_key: scores.get(k),
 			len(CLASSES),
+			False,
 		))
 
-	for test_dataset, models, with_paper in BAR_GRAPH_SETS:
-		models = [model for model in models if (model, test_dataset) in metrics]
-		if not models:
-			continue
+	graph_sets = [
+		(dataset, [m for m in models if (m, dataset) in metrics], with_paper)
+		for dataset, models, with_paper in graph_sets
+	]
+	graph_sets = [entry for entry in graph_sets if entry[1]]
+	if not graph_sets:
+		return
 
+	fig_width = 1.45 * len(groups) + 2
+	combined_axes = None
+	if combined_name:
+		fig, combined_axes = plt.subplots(
+			len(graph_sets), 1, figsize=(fig_width, 6 * len(graph_sets) + 3), squeeze=False
+		)
+	combined_handles = None
+
+	for set_index, (test_dataset, models, with_paper) in enumerate(graph_sets):
 		series = [(model, "own") for model in models]
 		if with_paper:
 			series += [(model, "paper") for model in models]
 
 		colors = plt.cm.tab10.colors
 		bar_width = 0.8 / len(series)
-		fig, axis = plt.subplots(figsize=(1.45 * len(groups) + 2, 6.5))
+		if combined_axes is not None:
+			axis = combined_axes[set_index, 0]
+		else:
+			fig, axis = plt.subplots(figsize=(fig_width, 6.5))
 		for series_index, (model, kind) in enumerate(series):
 			color = colors[models.index(model) % len(colors)]
 			means, errors = [], []
-			for _, own_getter, paper_getter, _ in groups:
+			for _, own_getter, paper_getter, _, _ in groups:
 				if kind == "own":
 					values = own_getter(model, test_dataset)
 					means.append(np.nanmean(values) if len(values) else np.nan)
@@ -781,31 +976,313 @@ def plot_bar_graphs(test_rows):
 					means.append(np.nan if score is None else score)
 					errors.append(0)
 			positions = np.arange(len(groups)) - 0.4 + bar_width * (series_index + 0.5)
-			label = model if kind == "own" else f"{model} (Tang et al.)"
-			axis.bar(
-				positions, means, bar_width, yerr=errors, capsize=2, color=color,
-				alpha=1.0 if kind == "own" else 0.55, hatch=None if kind == "own" else "//",
-				edgecolor="black", linewidth=0.5, label=label,
-			)
+			if kind == "own":
+				axis.bar(
+					positions, means, bar_width, yerr=errors, capsize=2, color=color,
+					edgecolor="black", linewidth=0.5,
+				)
+			else:
+				# Tang et al. accuracy/AUC come from tables; per-class values are read off figures.
+				for position, mean, group in zip(positions, means, groups):
+					axis.bar(
+						position, mean, bar_width, color=color, alpha=0.55,
+						hatch="//" if group[4] else None, edgecolor="black", linewidth=0.5,
+					)
 
-		axis.set_xticks(np.arange(len(groups)), [group[0] for group in groups], fontsize=8)
+		axis.set_xticks(np.arange(len(groups)), [group[0] for group in groups], fontsize=18)
 		axis.set_ylim(0, 1.05)
-		axis.set_ylabel("Score")
+		axis.set_ylabel("Score", fontsize=18)
 		axis.grid(axis="y", alpha=0.25)
 		for index in range(1, len(groups)):
 			if groups[index][3] != groups[index - 1][3]:
 				axis.axvline(index - 0.5, color="grey", linewidth=0.8)
-		axis.legend(frameon=False, ncol=len(series), loc="upper center",
-					bbox_to_anchor=(0.5, -0.14), fontsize=9)
-		axis.set_title(
-			f"All metrics - test input: {test_dataset}"
-			+ (" (own results vs Tang et al.)" if with_paper else "")
-			+ "\nBars = fold mean, error bars = std across folds"
-			+ ("; Tang et al. report FR I / FR II only" if with_paper else "")
-		)
+		handles = []
+		for model, kind in series:
+			color = colors[models.index(model) % len(colors)]
+			if kind == "own":
+				handles.append(Patch(facecolor=color, edgecolor="black", linewidth=0.5, label=model))
+			else:
+				handles.append(Patch(
+					facecolor=color, alpha=0.55, edgecolor="black", linewidth=0.5,
+					label=f"{model} (Tang et al.)",
+				))
+				handles.append(Patch(
+					facecolor=color, alpha=0.55, edgecolor="black", linewidth=0.5, hatch="//",
+					label=f"{model} (Tang et al., inferred from figures)",
+				))
+		legend_columns = 3 if with_paper else len(series)
+		if combined_axes is not None:
+			combined_handles = (handles, legend_columns)
+			axis.set_title(f"All metrics - test input: {test_dataset}")
+			continue
+		axis.legend(handles=handles, frameon=False, ncol=legend_columns,
+					loc="upper center", bbox_to_anchor=(0.5, -0.14), fontsize=14 if with_paper else 18)
+		axis.set_title(f"All metrics - test input: {test_dataset}")
 		fig.tight_layout()
-		save_figure(fig, BAR_DIR / f"bar_metrics_test_{test_dataset}.png")
+		BAR_DIR.mkdir(parents=True, exist_ok=True)
+		fig.savefig(BAR_DIR / f"{file_prefix}{test_dataset}.png", dpi=180, bbox_inches="tight")
 		plt.close(fig)
+
+	if combined_axes is not None:
+		handles, legend_columns = combined_handles
+		fig.legend(handles=handles, frameon=False, ncol=legend_columns, loc="lower center", fontsize=18)
+		fig.tight_layout(rect=(0, 0.1, 1, 1))
+		save_figure(fig, BAR_DIR / combined_name)
+		plt.close(fig)
+
+
+LATEX_DIR = OUTPUT_DIR / "LaTeX_Tables"
+LATEX_DATASETS = ["FIRST", "NVSS", "LoTSS"]
+LATEX_ACRONYMS = {"FIRST": r"\ac{first}", "NVSS": r"\ac{nvss}", "LoTSS": r"\ac{lotss}"}
+
+
+def _latex_cell(values):
+	"""Stack the FRI / FRII / Compact values under one another inside a tblr cell."""
+	return "{" + " \\\\ ".join("--" if np.isnan(v) else f"{v:.3f}" for v in values) + "}"
+
+
+def build_latex_results_table(test_rows, per_class, bases, caption, label, filename):
+	"""Write a tblr table; accuracy and overall AUC are single values, class metrics are stacked."""
+	acc = {}
+	overall_auc = {}
+	for row in test_rows:
+		acc.setdefault((row["model"], row["test_dataset"]), []).append(row["accuracy"])
+		overall_auc.setdefault((row["model"], row["test_dataset"]), []).append(row["roc_auc"])
+
+	groups = [(base, target) for base in bases for target in LATEX_DATASETS if base != target]
+	n = len(LATEX_DATASETS)
+	body = []
+	for base, target in groups:
+		model = f"{base}->{target}"
+		if base == "NONE":
+			label_text = LATEX_ACRONYMS[target]
+		else:
+			label_text = f"{LATEX_ACRONYMS[base]}$\\rightarrow${LATEX_ACRONYMS[target]}"
+		for k, test_set in enumerate(LATEX_DATASETS):
+			prefix = f"\\begin{{sideways}}{label_text}\\end{{sideways}}\n    & " if k == 0 else "    & "
+			cells = [LATEX_ACRONYMS[test_set].ljust(10)]
+			accuracies = acc.get((model, test_set))
+			cells.append("--" if not accuracies else f"{np.nanmean(accuracies):.3f}")
+			auc_values = overall_auc.get((model, test_set))
+			cells.append("--" if not auc_values else f"{np.nanmean(auc_values):.3f}")
+			metrics = per_class.get((model, test_set))
+			if metrics is None:
+				cells += ["--"] * 4
+			else:
+				mean = np.nanmean(metrics, axis=0)  # [class, metric]: recall, precision, f1, auc
+				for metric_index in (3, 0, 1, 2):
+					cells.append(_latex_cell(mean[:, metric_index]))
+			body.append(prefix + " & ".join(cells) + " \\\\")
+	body[-1] = body[-1][:-3]
+
+	starts = [2 + n * g for g in range(len(groups))]
+	last_row = 1 + n * len(groups)
+	spec = []
+	for row in range(3, last_row + 1, 2):
+		if row not in starts:
+			spec.append(f"row{{{row}}} = {{Silver}}")
+	for g, s in enumerate(starts):
+		spec.append(f"cell{{{s}}}{{1}} = {{r={n}}}{{{'Silver' if g % 2 == 0 else ''}}}")
+		if g % 2 == 1:
+			spec += [f"cell{{{s}}}{{{c}}} = {{Silver}}" for c in range(2, 9)]
+	outer = ",".join(["1-2"] + [str(s) for s in starts[1:]] + [str(last_row + 1)])
+	inner = ",".join(f"{s + 1}-{s + 2}" for s in starts)
+	spec = ",\n  ".join(spec)
+	text = (
+		"\\definecolor{Silver}{rgb}{0.87,0.87,0.87}\n"
+		"\\begin{table}\n"
+		f"\\caption{{{caption}}}\n"
+		"\\centering\n"
+		"\\begin{tblr}{\n"
+		"   cells = {c},\n"
+		f"  {spec},\n"
+		"  vlines,\n"
+		f"  hline{{{outer}}} = {{-}}{{}},\n"
+		f"  hline{{{inner}}} = {{2-8}}{{}},\n"
+		"}\n"
+		"Model & Test Set & Accuracy & Overall AUC & AUC & Recall & Precision & F1 \\\\\n"
+		+ "\n".join(body)
+		+ "\n\\end{tblr}\n"
+		f"\\label{{{label}}}\n"
+		"\\end{table}\n"
+	)
+	LATEX_DIR.mkdir(parents=True, exist_ok=True)
+	(LATEX_DIR / filename).write_text(text, encoding="utf-8")
+
+
+def build_winner_table(test_rows, per_class, graph_sets, filename):
+	"""Write a tblr table marking with X the better of the two models compared per test set and metric."""
+	overall = {}
+	for row in test_rows:
+		overall.setdefault((row["model"], row["test_dataset"]), []).append((row["accuracy"], row["roc_auc"]))
+
+	def score_vector(model, test_set):
+		"""Class metrics (recall, precision, F1, AUC per class) followed by overall accuracy and AUC."""
+		metrics, totals = per_class.get((model, test_set)), overall.get((model, test_set))
+		if metrics is None or not totals:
+			return [np.nan] * 14
+		mean = np.nanmean(metrics, axis=0)
+		return [round(float(v), 3) for v in mean.reshape(-1)] + [
+			round(float(v), 3) for v in np.nanmean(totals, axis=0)
+		]
+
+	body = []
+	for set_index, (test_set, models, _) in enumerate(graph_sets):
+		pair = [model for model in models if model.endswith(f"->{test_set}")]
+		vectors = [score_vector(model, test_set) for model in pair]
+		marks = [[""] * 14 for _ in pair]
+		for column in range(14):
+			a, b = vectors[0][column], vectors[1][column]
+			for k, value in enumerate((a, b)):
+				if np.isnan(value):
+					marks[k][column] = "N/A"
+			if np.isnan(a) or np.isnan(b):
+				continue
+			if a == b:
+				marks[0][column] = marks[1][column] = "T"
+			else:
+				marks[0 if a > b else 1][column] = "X"
+		for k, model in enumerate(pair):
+			base, target = model.split("->")
+			base_text = "NONE" if base == "NONE" else LATEX_ACRONYMS[base]
+			cells = [
+				LATEX_ACRONYMS[test_set] if k == 0 else "",
+				f"{base_text}$\\rightarrow${LATEX_ACRONYMS[target]}",
+			]
+			cells += marks[k] + [str(marks[k].count("X"))]
+			body.append(" & ".join(cells) + " \\\\")
+	body[-1] = body[-1][:-3]
+
+	text = (
+		"% \\usepackage{tabularray}\n"
+		"\\begin{table}\n"
+		"\\centering\n"
+		"\\begin{tblr}{\n"
+		"  cells = {c},\n"
+		"  cell{1}{1} = {r=2}{},\n"
+		"  cell{1}{2} = {r=2}{},\n"
+		"  cell{1}{3} = {c=4}{c},\n"
+		"  cell{1}{7} = {c=4}{c},\n"
+		"  cell{1}{11} = {c=4}{c},\n"
+		"  cell{1}{15} = {r=2}{c},\n"
+		"  cell{1}{16} = {r=2}{c},\n"
+		"  cell{1}{17} = {r=2}{c},\n"
+		"  cell{3}{1} = {r=2}{},\n"
+		"  cell{5}{1} = {r=2}{},\n"
+		"  vlines,\n"
+		"  hline{1,3,5,7} = {-}{},\n"
+		"  hline{2} = {3-14}{},\n"
+		"  hline{4,6} = {2-17}{},\n"
+		"}\n"
+		"Test Set & Model & FRI &  &  &  & FRII &  &  &  & Compact &  &  &  & Overall Acc & Overall AUC & Score \\\\\n"
+		" &  & Rec & Prec & F1 & AUC & Rec & Prec & F1 & AUC & Rec & Prec & F1 & AUC &  &  &  \\\\\n"
+		+ "\n".join(body)
+		+ "\n\\end{tblr}\n"
+		"\\end{table}\n"
+	)
+	LATEX_DIR.mkdir(parents=True, exist_ok=True)
+	(LATEX_DIR / filename).write_text(text, encoding="utf-8")
+
+
+def write_winner_tables(test_rows):
+	per_class = load_per_class_metrics()
+	for graph_sets, combined_name in PAIRED_BAR_GRAPHS:
+		name = combined_name.replace("bar_metrics_", "").replace("_combined.png", "")
+		build_winner_table(test_rows, per_class, graph_sets, f"winner_table_{name}.tex")
+
+
+def write_roc_auc_table(filename="roc_macro_auc_table.tex"):
+	"""Macro AUC of the mean macro-average ROC curve (the value in the ROC plot legends) for every model and test set."""
+	if not TESTING_DIR.is_dir():
+		return
+	fpr_grid = np.linspace(0, 1, 201)
+	values = {}
+	for folder in sorted(path for path in TESTING_DIR.iterdir() if path.is_dir()):
+		match = TESTING_FOLDER_PATTERN.match(folder.name)
+		y_true_path = folder / "y_test.npy"
+		if match is None or not y_true_path.exists():
+			continue
+		base, target, test_dataset = (DATASET_LABELS.get(name, name) for name in match.groups())
+		y_true = to_int_labels(np.load(y_true_path, allow_pickle=True))
+		macros = []
+		for fold in range(1, 6):
+			pred_path = folder / f"y_pred_test_fold_{fold}.npy"
+			if not pred_path.exists():
+				continue
+			y_prob = np.asarray(np.load(pred_path), dtype=float)
+			if y_prob.shape != (len(y_true), len(CLASSES)):
+				continue
+			macro = macro_roc_for_fold(y_true, y_prob, fpr_grid)[1]
+			if macro is not None:
+				macros.append(macro)
+		if macros:
+			values[(f"{base}->{target}", test_dataset)] = auc(fpr_grid, np.mean(macros, axis=0))
+
+	models = [f"NONE->{t}" for t in LATEX_DATASETS] + [
+		f"{b}->{t}" for b in LATEX_DATASETS for t in LATEX_DATASETS if b != t
+	]
+	models = [m for m in models if any((m, d) in values for d in LATEX_DATASETS)]
+	if not models:
+		return
+
+	def model_label(model):
+		base, target = model.split("->")
+		if base == "NONE":
+			return f"NONE$\\rightarrow${LATEX_ACRONYMS[target]}"
+		return f"{LATEX_ACRONYMS[base]}$\\rightarrow${LATEX_ACRONYMS[target]}"
+
+	body = []
+	for model in models:
+		cells = [model_label(model)] + [
+			f"{values[(model, d)]:.3f}" if (model, d) in values else "--" for d in LATEX_DATASETS
+		]
+		body.append(" & ".join(cells) + " \\\\")
+	body[-1] = body[-1][:-3]
+	shading = ",\n  ".join(f"row{{{row}}} = {{Silver}}" for row in range(3, len(models) + 2, 2))
+	text = (
+		"\\definecolor{Silver}{rgb}{0.87,0.87,0.87}\n"
+		"\\begin{table}\n"
+		"\\caption{Macro-average AUC of the ROC curves for every model (rows; NONE$\\rightarrow$X "
+		"trained from scratch, A$\\rightarrow$B transfer-learned) on each test set (columns).}\n"
+		"\\centering\n"
+		"\\begin{tblr}{\n"
+		"  cells = {c},\n"
+		+ (f"  {shading},\n" if shading else "")
+		+ "  vlines,\n"
+		f"  hline{{1-2,{len(models) + 2}}} = {{-}}{{}},\n"
+		"}\n"
+		"Model & " + " & ".join(LATEX_ACRONYMS[d] for d in LATEX_DATASETS) + " \\\\\n"
+		+ "\n".join(body)
+		+ "\n\\end{tblr}\n"
+		"\\label{tab:rocauc}\n"
+		"\\end{table}\n"
+	)
+	LATEX_DIR.mkdir(parents=True, exist_ok=True)
+	(LATEX_DIR / filename).write_text(text, encoding="utf-8")
+
+
+def write_latex_tables(test_rows):
+	write_winner_tables(test_rows)
+	write_roc_auc_table()
+	per_class = load_per_class_metrics()
+	scratch_caption = (
+		"Results of models trained from scratch, evaluated on all three test sets. Accuracy and "
+		"overall AUC are single values; class-specific metrics indicate results for \\ac{fri}, "
+		"\\ac{frii} and Compact classes respectively."
+	)
+	transfer_caption = (
+		"Results of transfer-learned models (rows labelled source$\\rightarrow$target), evaluated "
+		"on all three test sets. Accuracy and overall AUC are single values; class-specific metrics "
+		"indicate results for \\ac{fri}, \\ac{frii} and Compact classes respectively."
+	)
+	build_latex_results_table(
+		test_rows, per_class, ["NONE"], scratch_caption, "tab:scratchresults", "scratch_results_table.tex"
+	)
+	build_latex_results_table(
+		test_rows, per_class, LATEX_DATASETS, transfer_caption, "tab:transferresults",
+		"transfer_results_table.tex",
+	)
+	print(f"LaTeX tables saved to {LATEX_DIR}")
 
 
 def main():
@@ -815,6 +1292,8 @@ def main():
 	plot_roc_curves()
 	test_rows = load_test_metrics()
 	plot_bar_graphs(test_rows)
+	plot_tang_bubble_summaries()
+	plot_paired_bar_graphs(test_rows)
 	if test_rows:
 		write_csv(
 			CSV_DIR / "test_metrics_per_fold.csv",
@@ -822,6 +1301,8 @@ def main():
 			["experiment", "model", "test_dataset", "fold"] + [metric for metric, _ in HEATMAP_METRICS],
 		)
 		plot_metric_heatmaps(test_rows)
+		plot_plain_metric_heatmaps(test_rows)
+		write_latex_tables(test_rows)
 		best_models = best_heatmap_models(test_rows)
 		print(f"Best heatmap models (F1): {best_models}")
 		plot_bubble_summaries(best_models, BUBBLE_BEST_DIR)
