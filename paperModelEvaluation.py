@@ -15,6 +15,7 @@ from sklearn.metrics import (
 	accuracy_score,
 	auc,
 	f1_score,
+	matthews_corrcoef,
 	precision_recall_fscore_support,
 	precision_score,
 	roc_auc_score,
@@ -54,6 +55,7 @@ HEATMAP_METRICS = [
 	("precision", "Precision (macro)"),
 	("roc_auc", "ROC AUC (macro OvR)"),
 	("f1", "F1 (macro)"),
+	("mcc", "MCC"),
 ]
 TESTING_FOLDER_PATTERN = re.compile(r"base(.*?)_target(.*?)_dataset(.*?)_")
 
@@ -344,6 +346,7 @@ def compute_fold_test_metrics(y_true, y_prob):
 		"precision": precision_score(y_true, y_pred, average="macro", zero_division=0),
 		"roc_auc": roc_auc,
 		"f1": f1_score(y_true, y_pred, average="macro", zero_division=0),
+		"mcc": matthews_corrcoef(y_true, y_pred),
 	}
 
 
@@ -377,6 +380,21 @@ def load_test_metrics():
 				**compute_fold_test_metrics(y_true, y_prob),
 			})
 	return rows
+
+
+def _heatmap_axes(panel_count, column_count, model_count):
+	"""Figure with one heatmap axis per panel (2 columns up to 4 panels, else 3); spare axes are hidden."""
+	ncols = 2 if panel_count <= 4 else 3
+	nrows = int(np.ceil(panel_count / ncols))
+	fig, axes = plt.subplots(
+		nrows, ncols,
+		figsize=(ncols / 2 * (5 + 2.2 * column_count), nrows / 2 * (2.5 + 0.55 * model_count * 2)),
+		squeeze=False,
+	)
+	flat_axes = list(axes.ravel())
+	for axis in flat_axes[panel_count:]:
+		axis.set_visible(False)
+	return fig, flat_axes[:panel_count]
 
 
 def plot_metric_heatmaps(test_rows):
@@ -423,10 +441,8 @@ def plot_metric_heatmaps(test_rows):
 		["experiment", "model", "test_dataset", "folds"] + [metric for metric, _ in HEATMAP_METRICS],
 	)
 
-	fig, axes = plt.subplots(
-		2, 2, figsize=(5 + 2.2 * len(columns), 2.5 + 0.55 * len(models) * 2), squeeze=False
-	)
-	for axis, (metric, title) in zip(axes.ravel(), HEATMAP_METRICS):
+	fig, axes = _heatmap_axes(len(HEATMAP_METRICS), len(columns), len(models))
+	for axis, (metric, title) in zip(axes, HEATMAP_METRICS):
 		grid = grids[metric]
 		image = axis.imshow(np.ma.masked_invalid(grid), cmap="viridis", vmin=0, vmax=1, aspect="auto")
 		axis.set_xticks(range(len(columns)), columns, fontsize=10)
@@ -461,10 +477,8 @@ def plot_plain_metric_heatmaps(test_rows):
 	"""Heatmaps of fold-mean test metrics per dataset only: no Average/Weighted scores, no highlighting."""
 	models = sorted({row["model"] for row in test_rows})
 	datasets = sorted({row["test_dataset"] for row in test_rows})
-	fig, axes = plt.subplots(
-		2, 2, figsize=(5 + 2.2 * len(datasets), 2.5 + 0.55 * len(models) * 2), squeeze=False
-	)
-	for axis, (metric, title) in zip(axes.ravel(), HEATMAP_METRICS):
+	fig, axes = _heatmap_axes(len(HEATMAP_METRICS), len(datasets), len(models))
+	for axis, (metric, title) in zip(axes, HEATMAP_METRICS):
 		grid = np.full((len(models), len(datasets)), np.nan)
 		for i, model in enumerate(models):
 			for j, dataset in enumerate(datasets):
@@ -491,6 +505,104 @@ def plot_plain_metric_heatmaps(test_rows):
 	fig.tight_layout(rect=(0, 0, 1, 0.95))
 	save_figure(fig, HEATMAP_DIR / "test_metric_heatmaps_plain.png")
 	plt.close(fig)
+
+
+# Per-class heatmap panels: (CSV key, panel title, index into load_per_class_metrics' metric axis).
+# Per-class accuracy is the fraction of that class's sources classified correctly (i.e. class recall).
+PER_CLASS_HEATMAP_METRICS = [
+	("accuracy", "Accuracy (class recall)", 0),
+	("precision", "Precision", 1),
+	("roc_auc", "ROC AUC (OvR)", 3),
+	("f1", "F1", 2),
+	("mcc", "MCC (OvR)", 4),
+]
+
+
+def _draw_heatmap_panels(panels, models, columns, dataset_count, suptitle, path, highlight):
+	"""Draw a figure of heatmaps; panels is a list of (title, grid[model, column])."""
+	fig, axes = _heatmap_axes(len(panels), len(columns), len(models))
+	for axis, (title, grid) in zip(axes, panels):
+		image = axis.imshow(np.ma.masked_invalid(grid), cmap="viridis", vmin=0, vmax=1, aspect="auto")
+		axis.set_xticks(range(len(columns)), columns, fontsize=10)
+		axis.set_yticks(range(len(models)), models, fontsize=10)
+		axis.set_xlabel("Test dataset", fontsize=10)
+		axis.set_title(title)
+		for i in range(len(models)):
+			for j in range(len(columns)):
+				if not np.isnan(grid[i, j]):
+					axis.text(
+						j, i, f"{grid[i, j]:.3f}", ha="center", va="center",
+						color="white" if grid[i, j] < 0.6 else "black", fontsize=14,
+					)
+		if highlight:
+			axis.axvline(dataset_count - 0.5, color="white", linewidth=2)
+			for column_index, color, inset in ((-2, "blue", 0.08), (-1, "red", 0.0)):
+				scores = grid[:, column_index]
+				if np.all(np.isnan(scores)):
+					continue
+				best = int(np.nanargmax(scores))
+				axis.add_patch(Rectangle(
+					(-0.5 + inset, best - 0.5 + inset), len(columns) - 2 * inset, 1 - 2 * inset,
+					fill=False, edgecolor=color, linewidth=3, clip_on=False,
+				))
+		fig.colorbar(image, ax=axis, fraction=0.046, pad=0.04)
+	fig.suptitle(suptitle)
+	fig.tight_layout(rect=(0, 0, 1, 0.95))
+	save_figure(fig, path)
+	plt.close(fig)
+
+
+def plot_per_class_metric_heatmaps(test_rows):
+	"""Per-class versions of the test metric heatmaps: one highlighted and one plain figure per class."""
+	per_class = load_per_class_metrics()
+	if not per_class:
+		return
+	models = sorted({row["model"] for row in test_rows})
+	datasets = sorted({row["test_dataset"] for row in test_rows})
+	weights = np.array([DATASET_WEIGHTS.get(dataset, np.nan) for dataset in datasets])
+	columns = datasets + ["Average", "Weighted"]
+
+	csv_rows = []
+	for class_index, class_name in enumerate(CLASSES):
+		class_label = BUBBLE_CLASS_LABELS.get(class_name, class_name)
+		grids = {}
+		for metric, _, metric_index in PER_CLASS_HEATMAP_METRICS:
+			grid = np.full((len(models), len(datasets)), np.nan)
+			for i, model in enumerate(models):
+				for j, dataset in enumerate(datasets):
+					values = per_class.get((model, dataset))
+					if values is None:
+						continue
+					values = values[:, class_index, metric_index]
+					if not np.all(np.isnan(values)):
+						grid[i, j] = np.nanmean(values)
+			# As for the macro heatmaps, a model missing any dataset gets no average/weighted score.
+			grids[metric] = np.hstack([grid, grid.mean(axis=1)[:, None], (grid @ weights)[:, None]])
+
+		for i, model in enumerate(models):
+			for j, column in enumerate(columns):
+				row = {"experiment": "Experiment_0", "model": model, "test_dataset": column, "class": class_name}
+				for metric, _, _ in PER_CLASS_HEATMAP_METRICS:
+					row[metric] = grids[metric][i, j]
+				csv_rows.append(row)
+
+		safe_class = re.sub(r"[^A-Za-z0-9._-]+", "_", class_name)
+		_draw_heatmap_panels(
+			[(title, grids[metric]) for metric, title, _ in PER_CLASS_HEATMAP_METRICS],
+			models, columns, len(datasets), f"Test metrics - {class_label}",
+			HEATMAP_DIR / f"test_metric_heatmaps_{safe_class}.png", highlight=True,
+		)
+		_draw_heatmap_panels(
+			[(title, grids[metric][:, :len(datasets)]) for metric, title, _ in PER_CLASS_HEATMAP_METRICS],
+			models, datasets, len(datasets), f"Test metrics - {class_label}",
+			HEATMAP_DIR / f"test_metric_heatmaps_{safe_class}_plain.png", highlight=False,
+		)
+
+	write_csv(
+		CSV_DIR / "test_metrics_per_class_fold_mean.csv",
+		csv_rows,
+		["experiment", "model", "test_dataset", "class"] + [m for m, _, _ in PER_CLASS_HEATMAP_METRICS],
+	)
 
 
 def macro_roc_for_fold(y_true, y_prob, fpr_grid):
@@ -597,7 +709,9 @@ BUBBLE_CLASS_LABELS = {"FRI": "FR I", "FRII": "FR II", "COMPACT": "Compact"}
 
 
 def load_per_class_metrics():
-	"""Return {(model, test_dataset): array[fold, class, metric]} with metrics in BUBBLE_METRICS order."""
+	"""Return {(model, test_dataset): array[fold, class, metric]}.
+
+	Metrics are in BUBBLE_METRICS order (recall, precision, F1, AUC), followed by one-vs-rest MCC at index 4."""
 	results = {}
 	if not TESTING_DIR.is_dir():
 		return results
@@ -623,14 +737,13 @@ def load_per_class_metrics():
 			)
 			# Precision is undefined (0/0) for a class that is never predicted.
 			precision = np.where(np.bincount(y_pred, minlength=len(labels)) == 0, np.nan, precision)
-			aucs = []
+			aucs, mccs = [], []
 			for index in labels:
 				positives = y_true == index
-				aucs.append(
-					roc_auc_score(positives, y_prob[:, index])
-					if positives.any() and not positives.all() else np.nan
-				)
-			folds.append(np.stack([recall, precision, f1, np.array(aucs)], axis=1))
+				defined = positives.any() and not positives.all()
+				aucs.append(roc_auc_score(positives, y_prob[:, index]) if defined else np.nan)
+				mccs.append(matthews_corrcoef(positives, y_pred == index) if defined else np.nan)
+			folds.append(np.stack([recall, precision, f1, np.array(aucs), np.array(mccs)], axis=1))
 		if folds:
 			results[(f"{base}->{target}", test_dataset)] = np.stack(folds)
 	return results
@@ -757,7 +870,8 @@ def plot_bubble_summaries(best_models=None, output_dir=BUBBLE_DIR):
 BAR_DIR = OUTPUT_DIR / "Metric_Bar_Graphs"
 
 # Tang et al. results (scores on a 0-1 scale). Per-class values were only published for the
-# NONE->X models (Tang Xavier, Table 3.3-3.5); transfer models use Tang Method 0 (accuracy/AUC only).`n# Compact was not evaluated, and their AUC is a single overall value.
+# NONE->X models (Tang Xavier, Table 3.3-3.5); transfer models use Tang Method 0 (accuracy/AUC only).
+# Compact was not evaluated, and their AUC is a single overall value.
 def _tang(accuracy, auc, recall=(None, None), precision=(None, None), f1=(None, None)):
 	return {
 		"accuracy": accuracy,
@@ -1110,8 +1224,33 @@ def build_latex_results_table(test_rows, per_class, bases, caption, label, filen
 	(LATEX_DIR / filename).write_text(text, encoding="utf-8")
 
 
+WINNER_COLUMNS = 14  # 3 classes x (recall, precision, F1, AUC) + overall accuracy + overall AUC
+
+
+def _winner_marks(vectors):
+	"""Mark the best model per column with X (T on a tie, N/A where a value is missing)."""
+	marks = [[""] * WINNER_COLUMNS for _ in vectors]
+	for column in range(WINNER_COLUMNS):
+		values = [vector[column] for vector in vectors]
+		valid = [k for k, value in enumerate(values) if not np.isnan(value)]
+		for k in range(len(values)):
+			if k not in valid:
+				marks[k][column] = "N/A"
+		if len(valid) < 2:
+			continue
+		best = max(values[k] for k in valid)
+		winners = [k for k in valid if values[k] == best]
+		for k in winners:
+			marks[k][column] = "T" if len(winners) > 1 else "X"
+	return marks
+
+
 def build_winner_table(test_rows, per_class, graph_sets, filename):
-	"""Write a tblr table marking with X the better of the two models compared per test set and metric."""
+	"""Write a tblr table of every model on every test set in graph_sets.
+
+	Within each test set the models are grouped by the dataset they were (fine-)tuned on; the models in a
+	group are compared with each other, the better one per metric is marked with X, and Score counts the
+	X marks. The in-domain group (fine-tuned on the test set itself) is listed first."""
 	overall = {}
 	for row in test_rows:
 		overall.setdefault((row["model"], row["test_dataset"]), []).append((row["accuracy"], row["roc_auc"]))
@@ -1120,38 +1259,50 @@ def build_winner_table(test_rows, per_class, graph_sets, filename):
 		"""Class metrics (recall, precision, F1, AUC per class) followed by overall accuracy and AUC."""
 		metrics, totals = per_class.get((model, test_set)), overall.get((model, test_set))
 		if metrics is None or not totals:
-			return [np.nan] * 14
-		mean = np.nanmean(metrics, axis=0)
+			return [np.nan] * WINNER_COLUMNS
+		mean = np.nanmean(metrics[:, :, :4], axis=0)  # recall, precision, F1, AUC per class
 		return [round(float(v), 3) for v in mean.reshape(-1)] + [
 			round(float(v), 3) for v in np.nanmean(totals, axis=0)
 		]
 
 	body = []
-	for set_index, (test_set, models, _) in enumerate(graph_sets):
-		pair = [model for model in models if model.endswith(f"->{test_set}")]
-		vectors = [score_vector(model, test_set) for model in pair]
-		marks = [[""] * 14 for _ in pair]
-		for column in range(14):
-			a, b = vectors[0][column], vectors[1][column]
-			for k, value in enumerate((a, b)):
-				if np.isnan(value):
-					marks[k][column] = "N/A"
-			if np.isnan(a) or np.isnan(b):
-				continue
-			if a == b:
-				marks[0][column] = marks[1][column] = "T"
-			else:
-				marks[0 if a > b else 1][column] = "X"
-		for k, model in enumerate(pair):
-			base, target = model.split("->")
-			base_text = "NONE" if base == "NONE" else LATEX_ACRONYMS[base]
-			cells = [
-				LATEX_ACRONYMS[test_set] if k == 0 else "",
-				f"{base_text}$\\rightarrow${LATEX_ACRONYMS[target]}",
-			]
-			cells += marks[k] + [str(marks[k].count("X"))]
-			body.append(" & ".join(cells) + " \\\\")
+	set_starts, group_starts, model_rows = [], [], []
+	spec = []
+	row_number = 3  # rows 1-2 are the header
+	for test_set, models, _ in graph_sets:
+		by_target = {}
+		for model in models:
+			by_target.setdefault(model.split("->")[1], []).append(model)
+		ordered_groups = sorted(by_target.items(), key=lambda item: item[0] != test_set)
+
+		set_start = row_number
+		set_starts.append(set_start)
+		for _, group in ordered_groups:
+			group_starts.append(row_number)
+			marks = _winner_marks([score_vector(model, test_set) for model in group])
+			for k, model in enumerate(group):
+				if k > 0:
+					model_rows.append(row_number)
+				base, target = model.split("->")
+				base_text = "NONE" if base == "NONE" else LATEX_ACRONYMS[base]
+				cells = [
+					LATEX_ACRONYMS[test_set] if row_number == set_start else "",
+					f"{base_text}$\\rightarrow${LATEX_ACRONYMS[target]}",
+				]
+				cells += marks[k] + [str(marks[k].count("X"))]
+				body.append(" & ".join(cells) + " \\\\")
+				row_number += 1
+		spec.append(f"cell{{{set_start}}}{{1}} = {{r={row_number - set_start}}}{{}}")
 	body[-1] = body[-1][:-3]
+	end_row = row_number
+
+	full_lines = ",".join(str(r) for r in [1] + set_starts + [end_row])
+	group_lines = [r for r in group_starts if r not in set_starts]
+	hlines = [f"  hline{{{full_lines}}} = {{-}}{{}},", "  hline{2} = {3-14}{},"]
+	if group_lines:
+		hlines.append(f"  hline{{{','.join(map(str, group_lines))}}} = {{2-17}}{{}},")
+	if model_rows:
+		hlines.append(f"  hline{{{','.join(map(str, model_rows))}}} = {{2-17}}{{dashed}},")
 
 	text = (
 		"% \\usepackage{tabularray}\n"
@@ -1167,12 +1318,9 @@ def build_winner_table(test_rows, per_class, graph_sets, filename):
 		"  cell{1}{15} = {r=2}{c},\n"
 		"  cell{1}{16} = {r=2}{c},\n"
 		"  cell{1}{17} = {r=2}{c},\n"
-		"  cell{3}{1} = {r=2}{},\n"
-		"  cell{5}{1} = {r=2}{},\n"
-		"  vlines,\n"
-		"  hline{1,3,5,7} = {-}{},\n"
-		"  hline{2} = {3-14}{},\n"
-		"  hline{4,6} = {2-17}{},\n"
+		+ "".join(f"  {entry},\n" for entry in spec)
+		+ "  vlines,\n"
+		+ "\n".join(hlines) + "\n"
 		"}\n"
 		"Test Set & Model & FRI &  &  &  & FRII &  &  &  & Compact &  &  &  & Overall Acc & Overall AUC & Score \\\\\n"
 		" &  & Rec & Prec & F1 & AUC & Rec & Prec & F1 & AUC & Rec & Prec & F1 & AUC &  &  &  \\\\\n"
@@ -1184,11 +1332,20 @@ def build_winner_table(test_rows, per_class, graph_sets, filename):
 	(LATEX_DIR / filename).write_text(text, encoding="utf-8")
 
 
+# Every model on every test set: within a test set, each fine-tune group holds NONE->X and both A->X models.
+ALL_WINNER_MODELS = [
+	f"{base}->{target}" for target in LATEX_DATASETS
+	for base in ["NONE"] + LATEX_DATASETS if base != target
+]
+ALL_WINNER_SETS = [(test_set, ALL_WINNER_MODELS, False) for test_set in LATEX_DATASETS]
+
+
 def write_winner_tables(test_rows):
 	per_class = load_per_class_metrics()
 	for graph_sets, combined_name in PAIRED_BAR_GRAPHS:
 		name = combined_name.replace("bar_metrics_", "").replace("_combined.png", "")
 		build_winner_table(test_rows, per_class, graph_sets, f"winner_table_{name}.tex")
+	build_winner_table(test_rows, per_class, ALL_WINNER_SETS, "winner_table_all.tex")
 
 
 def write_roc_auc_table(filename="roc_macro_auc_table.tex"):
@@ -1261,8 +1418,95 @@ def write_roc_auc_table(filename="roc_macro_auc_table.tex"):
 	(LATEX_DIR / filename).write_text(text, encoding="utf-8")
 
 
+def write_top_models(test_rows, metric="f1", top_n=3, filename="top_models_per_test_set.tex"):
+	"""Rank every model on each test set by the fold-mean of `metric`; write the top_n as CSV, LaTeX and console output."""
+	metric_titles = {
+		"accuracy": "Accuracy", "precision": "Precision (macro)", "roc_auc": "ROC AUC (macro)", "f1": "F1 (macro)",
+		"mcc": "MCC",
+	}
+	metric_keys = list(metric_titles)
+	summary = {}
+	for row in test_rows:
+		summary.setdefault((row["test_dataset"], row["model"]), []).append([row[k] for k in metric_keys])
+
+	csv_rows, body, set_starts = [], [], []
+	row_number = 2
+	test_sets = [d for d in LATEX_DATASETS if any(key[0] == d for key in summary)]
+	for test_set in test_sets:
+		ranked = []
+		for (dataset, model), values in summary.items():
+			if dataset != test_set:
+				continue
+			values = np.asarray(values, dtype=float)
+			means = dict(zip(metric_keys, np.nanmean(values, axis=0)))
+			stds = dict(zip(metric_keys, np.nanstd(values, axis=0)))
+			if not np.isnan(means[metric]):
+				ranked.append((model, means, stds))
+		ranked.sort(key=lambda item: item[1][metric], reverse=True)
+		ranked = ranked[:top_n]
+		if not ranked:
+			continue
+
+		print(f"Top {len(ranked)} models on {test_set} (by {metric_titles[metric]}):")
+		set_starts.append(row_number)
+		for rank, (model, means, stds) in enumerate(ranked, start=1):
+			print(f"  {rank}. {model:<14} " + "  ".join(
+				f"{k}={means[k]:.3f}+/-{stds[k]:.3f}" for k in metric_keys
+			))
+			csv_row = {"test_dataset": test_set, "rank": rank, "model": model, "ranked_by": metric}
+			for k in metric_keys:
+				csv_row[f"{k}_mean"], csv_row[f"{k}_std"] = means[k], stds[k]
+			csv_rows.append(csv_row)
+
+			base, target = model.split("->")
+			base_text = "NONE" if base == "NONE" else LATEX_ACRONYMS.get(base, base)
+			cells = [
+				LATEX_ACRONYMS.get(test_set, test_set) if rank == 1 else "",
+				str(rank),
+				f"{base_text}$\\rightarrow${LATEX_ACRONYMS.get(target, target)}",
+			]
+			for k in metric_keys:
+				value = f"{means[k]:.3f} $\\pm$ {stds[k]:.3f}"
+				cells.append(f"\\textbf{{{value}}}" if k == metric else value)
+			body.append(" & ".join(cells) + " \\\\")
+			row_number += 1
+	if not body:
+		return
+
+	write_csv(
+		CSV_DIR / "top_models_per_test_set.csv", csv_rows,
+		["test_dataset", "rank", "model", "ranked_by"] + [f"{k}_{s}" for k in metric_keys for s in ("mean", "std")],
+	)
+	body[-1] = body[-1][:-3]
+	spans = [
+		f"  cell{{{start}}}{{1}} = {{r={end - start}}}{{}},"
+		for start, end in zip(set_starts, set_starts[1:] + [row_number])
+	]
+	text = (
+		"% \\usepackage{tabularray}\n"
+		"\\begin{table}\n"
+		f"\\caption{{Top {top_n} models on each test set, ranked by fold-mean {metric_titles[metric]} "
+		"(bold). Values are mean $\\pm$ standard deviation over the folds.}\n"
+		"\\centering\n"
+		"\\begin{tblr}{\n"
+		"  cells = {c},\n"
+		+ "\n".join(spans) + "\n"
+		"  vlines,\n"
+		f"  hline{{1,2,{','.join(map(str, set_starts[1:] + [row_number]))}}} = {{-}}{{}},\n"
+		"}\n"
+		"Test Set & Rank & Model & " + " & ".join(metric_titles[k] for k in metric_keys) + " \\\\\n"
+		+ "\n".join(body)
+		+ "\n\\end{tblr}\n"
+		"\\label{tab:topmodels}\n"
+		"\\end{table}\n"
+	)
+	LATEX_DIR.mkdir(parents=True, exist_ok=True)
+	(LATEX_DIR / filename).write_text(text, encoding="utf-8")
+
+
 def write_latex_tables(test_rows):
 	write_winner_tables(test_rows)
+	write_top_models(test_rows)
 	write_roc_auc_table()
 	per_class = load_per_class_metrics()
 	scratch_caption = (
@@ -1285,6 +1529,286 @@ def write_latex_tables(test_rows):
 	print(f"LaTeX tables saved to {LATEX_DIR}")
 
 
+BEST_MODEL_DIR = OUTPUT_DIR / "Best_Model"
+# Validated categorical palette (blue, orange, aqua): passes colour-blind separation checks.
+BEST_CLASS_COLORS = ["#2a78d6", "#eb6834", "#1baf7a"]
+BEST_COMPARE_COLORS = {"selected": "#2a78d6", "baseline": "#eb6834"}
+BEST_MACRO_METRICS = [
+	("accuracy", "Accuracy"), ("precision", "Precision\n(macro)"), ("roc_auc", "ROC AUC\n(macro)"),
+	("f1", "F1\n(macro)"), ("mcc", "MCC"),
+]
+BEST_CLASS_METRICS = [("Recall", 0), ("Precision", 1), ("F1", 2), ("AUC", 3), ("MCC", 4)]
+
+
+def load_model_predictions(model):
+	"""Return {test_dataset: (y_true, [y_prob per fold])} for one model."""
+	predictions = {}
+	if not TESTING_DIR.is_dir():
+		return predictions
+	for folder in sorted(path for path in TESTING_DIR.iterdir() if path.is_dir()):
+		match = TESTING_FOLDER_PATTERN.match(folder.name)
+		y_true_path = folder / "y_test.npy"
+		if match is None or not y_true_path.exists():
+			continue
+		base, target, test_dataset = (DATASET_LABELS.get(name, name) for name in match.groups())
+		if f"{base}->{target}" != model:
+			continue
+		y_true = to_int_labels(np.load(y_true_path, allow_pickle=True))
+		folds = []
+		for fold in range(1, 6):
+			pred_path = folder / f"y_pred_test_fold_{fold}.npy"
+			if pred_path.exists():
+				y_prob = np.asarray(np.load(pred_path), dtype=float)
+				if y_prob.shape == (len(y_true), len(CLASSES)):
+					folds.append(y_prob)
+		if folds:
+			predictions[test_dataset] = (y_true, folds)
+	return predictions
+
+
+def _fold_stats(test_rows, model, test_set, metric):
+	values = np.array([
+		row[metric] for row in test_rows if row["model"] == model and row["test_dataset"] == test_set
+	], dtype=float)
+	if not len(values) or np.all(np.isnan(values)):
+		return np.nan, np.nan
+	return float(np.nanmean(values)), float(np.nanstd(values))
+
+
+def plot_best_model_summary(test_rows, best_model, ranking_metric="f1"):
+	"""Final summary tables and plots for the selected model (best weighted macro F1 by default)."""
+	if not best_model:
+		return
+	BEST_MODEL_DIR.mkdir(parents=True, exist_ok=True)
+	per_class = load_per_class_metrics()
+	predictions = load_model_predictions(best_model)
+	test_sets = [d for d in LATEX_DATASETS if (best_model, d) in per_class]
+	if not test_sets:
+		return
+	metric_keys = [key for key, _ in BEST_MACRO_METRICS]
+	all_models = sorted({row["model"] for row in test_rows})
+
+	# --- Macro summary per test set, with rank among all models and the Average/Weighted aggregates.
+	summary_rows = []
+	for test_set in test_sets:
+		row = {"model": best_model, "test_dataset": test_set}
+		for key in metric_keys:
+			row[f"{key}_mean"], row[f"{key}_std"] = _fold_stats(test_rows, best_model, test_set, key)
+		scores = {m: _fold_stats(test_rows, m, test_set, ranking_metric)[0] for m in all_models}
+		ordered = sorted((m for m in scores if not np.isnan(scores[m])), key=lambda m: -scores[m])
+		row["rank"] = ordered.index(best_model) + 1 if best_model in ordered else ""
+		row["models_ranked"] = len(ordered)
+		summary_rows.append(row)
+	weights = np.array([DATASET_WEIGHTS.get(d, np.nan) for d in test_sets])
+	per_set_rows = list(summary_rows)
+	for label, combine in (("Average", np.mean), ("Weighted", lambda v: float(v @ weights))):
+		row = {"model": best_model, "test_dataset": label}
+		for key in metric_keys:
+			means = np.array([r[f"{key}_mean"] for r in per_set_rows], dtype=float)
+			row[f"{key}_mean"] = combine(means) if len(test_sets) == len(LATEX_DATASETS) else np.nan
+			row[f"{key}_std"] = ""
+		summary_rows.append(row)
+	write_csv(
+		BEST_MODEL_DIR / "best_model_summary.csv", summary_rows,
+		["model", "test_dataset", "rank", "models_ranked"]
+		+ [f"{k}_{s}" for k in metric_keys for s in ("mean", "std")],
+	)
+
+	# --- Per-class summary.
+	class_rows = []
+	for test_set in test_sets:
+		values = per_class[(best_model, test_set)]
+		for class_index, class_name in enumerate(CLASSES):
+			row = {"model": best_model, "test_dataset": test_set, "class": class_name}
+			for name, metric_index in BEST_CLASS_METRICS:
+				column = values[:, class_index, metric_index]
+				all_nan = np.all(np.isnan(column))
+				row[f"{name.lower()}_mean"] = np.nan if all_nan else float(np.nanmean(column))
+				row[f"{name.lower()}_std"] = np.nan if all_nan else float(np.nanstd(column))
+			class_rows.append(row)
+	write_csv(
+		BEST_MODEL_DIR / "best_model_per_class.csv", class_rows,
+		["model", "test_dataset", "class"]
+		+ [f"{name.lower()}_{s}" for name, _ in BEST_CLASS_METRICS for s in ("mean", "std")],
+	)
+
+	# --- LaTeX summary table.
+	base, target = best_model.split("->")
+	model_tex = (
+		f"{'NONE' if base == 'NONE' else LATEX_ACRONYMS.get(base, base)}"
+		f"$\\rightarrow${LATEX_ACRONYMS.get(target, target)}"
+	)
+	body = []
+	for row in summary_rows:
+		label = LATEX_ACRONYMS.get(row["test_dataset"], row["test_dataset"])
+		cells = [label]
+		for key in metric_keys:
+			mean, std = row[f"{key}_mean"], row[f"{key}_std"]
+			if np.isnan(mean):
+				cells.append("--")
+			elif std == "":
+				cells.append(f"{mean:.3f}")
+			else:
+				cells.append(f"{mean:.3f} $\\pm$ {std:.3f}")
+		cells.append(f"{row['rank']}/{row['models_ranked']}" if row.get("rank") else "--")
+		body.append(" & ".join(cells) + " \\\\")
+	body[-1] = body[-1][:-3]
+	text = (
+		"% \\usepackage{tabularray}\n"
+		"\\begin{table}\n"
+		f"\\caption{{Final results of the selected model ({model_tex}), chosen by the highest "
+		"dataset-weighted macro F1. Values are fold mean $\\pm$ standard deviation; Average and "
+		"Weighted combine the three test sets. Rank is the model's position by macro F1 among all "
+		"models on that test set.}\n"
+		"\\centering\n"
+		"\\begin{tblr}{\n"
+		"  cells = {c},\n"
+		"  vlines,\n"
+		f"  hline{{1,2,{len(test_sets) + 2},{len(summary_rows) + 2}}} = {{-}}{{}},\n"
+		"}\n"
+		"Test Set & Accuracy & Precision (macro) & ROC AUC (macro) & F1 (macro) & MCC & Rank \\\\\n"
+		+ "\n".join(body)
+		+ "\n\\end{tblr}\n"
+		"\\label{tab:bestmodel}\n"
+		"\\end{table}\n"
+	)
+	(BEST_MODEL_DIR / "best_model_summary.tex").write_text(text, encoding="utf-8")
+
+	class_labels = [BUBBLE_CLASS_LABELS.get(c, c) for c in CLASSES]
+	n = len(test_sets)
+
+	# --- Confusion matrices: row-normalised per fold, then averaged over folds.
+	if predictions:
+		fig, axes = plt.subplots(1, n, figsize=(6.2 * n, 7), squeeze=False)
+		for axis, test_set in zip(axes[0], test_sets):
+			if test_set not in predictions:
+				axis.set_visible(False)
+				continue
+			y_true, folds = predictions[test_set]
+			matrices, counts = [], []
+			for y_prob in folds:
+				y_pred = np.argmax(y_prob, axis=1)
+				matrix = np.zeros((len(CLASSES), len(CLASSES)))
+				np.add.at(matrix, (y_true, y_pred), 1)
+				counts.append(matrix)
+				totals = matrix.sum(axis=1, keepdims=True)
+				matrices.append(np.divide(matrix, totals, out=np.full_like(matrix, np.nan), where=totals > 0))
+			fraction = np.nanmean(matrices, axis=0)
+			mean_counts = np.mean(counts, axis=0)
+			axis.imshow(np.ma.masked_invalid(fraction), cmap="Blues", vmin=0, vmax=1)
+			for i in range(len(CLASSES)):
+				for j in range(len(CLASSES)):
+					if np.isnan(fraction[i, j]):
+						continue
+					axis.text(
+						j, i, f"{100 * fraction[i, j]:.1f}%\n(n={mean_counts[i, j]:.0f})",
+						ha="center", va="center", fontsize=14,
+						color="white" if fraction[i, j] > 0.55 else "#1a1a19",
+					)
+			axis.set_xticks(range(len(CLASSES)), class_labels, fontsize=14)
+			axis.set_yticks(range(len(CLASSES)), class_labels, fontsize=14)
+			axis.set_xlabel("Predicted class", fontsize=14)
+			axis.set_ylabel("True class", fontsize=14)
+			axis.set_title(f"Test: {test_set}", fontsize=18)
+		fig.suptitle(f"{best_model} - confusion matrices (fold mean, row-normalised)", fontsize=20)
+		fig.tight_layout(rect=(0, 0.02, 1, 0.93))
+		save_figure(fig, BEST_MODEL_DIR / "best_model_confusion_matrices.png")
+		plt.close(fig)
+
+	# --- Per-class metrics: one panel per test set, classes side by side for each metric.
+	fig, axes = plt.subplots(1, n, figsize=(6.5 * n, 5.8), sharey=True, squeeze=False)
+	bar_width = 0.8 / len(CLASSES)
+	low = 0.0
+	for axis, test_set in zip(axes[0], test_sets):
+		values = per_class[(best_model, test_set)]
+		for class_index, (class_label, color) in enumerate(zip(class_labels, BEST_CLASS_COLORS)):
+			means, stds = [], []
+			for _, metric_index in BEST_CLASS_METRICS:
+				column = values[:, class_index, metric_index]
+				all_nan = np.all(np.isnan(column))
+				means.append(np.nan if all_nan else np.nanmean(column))
+				stds.append(0 if all_nan else np.nanstd(column))
+			low = min(low, np.nanmin(np.array(means) - np.array(stds)))
+			positions = np.arange(len(BEST_CLASS_METRICS)) - 0.4 + bar_width * (class_index + 0.5)
+			axis.bar(
+				positions, means, bar_width, yerr=stds, capsize=3, color=color,
+				edgecolor="white", linewidth=1, label=class_label,
+				error_kw={"elinewidth": 1, "ecolor": "#3d3d3a"},
+			)
+		axis.set_xticks(range(len(BEST_CLASS_METRICS)), [name for name, _ in BEST_CLASS_METRICS], fontsize=14)
+		axis.tick_params(axis="y", labelsize=14)
+		axis.set_title(f"Test: {test_set}", fontsize=18)
+		axis.grid(axis="y", alpha=0.25)
+		axis.set_axisbelow(True)
+		axis.axhline(0, color="#3d3d3a", linewidth=0.8)
+	axes[0, 0].set_ylabel("Score (fold mean ± std)", fontsize=14)
+	axes[0, 0].set_ylim(min(0, low - 0.05), 1.05)
+	handles, labels = axes[0, 0].get_legend_handles_labels()
+	fig.legend(handles, labels, loc="lower center", ncol=len(CLASSES), frameon=False, fontsize=14)
+	fig.suptitle(f"{best_model} - per-class metrics", fontsize=20)
+	fig.tight_layout(rect=(0, 0.08, 1, 0.93))
+	save_figure(fig, BEST_MODEL_DIR / "best_model_per_class_metrics.png")
+	plt.close(fig)
+
+	# --- Selected model vs the from-scratch model trained on each test survey (in-domain baseline).
+	fig, axes = plt.subplots(1, n, figsize=(6.5 * n, 5.8), sharey=True, squeeze=False)
+	low = 0.0
+	for axis, test_set in zip(axes[0], test_sets):
+		baseline = f"NONE->{test_set}"
+		series = [(best_model, "selected", f"{best_model} (selected)")]
+		if baseline != best_model:
+			series.append((baseline, "baseline", f"NONE->test survey (in-domain baseline)"))
+		width = 0.8 / len(series)
+		for index, (model, role, label) in enumerate(series):
+			stats = [_fold_stats(test_rows, model, test_set, key) for key in metric_keys]
+			means = np.array([s[0] for s in stats])
+			stds = np.nan_to_num(np.array([s[1] for s in stats]))
+			low = min(low, np.nanmin(means - stds)) if not np.all(np.isnan(means)) else low
+			positions = np.arange(len(metric_keys)) - 0.4 + width * (index + 0.5)
+			axis.bar(
+				positions, means, width, yerr=stds, capsize=3, color=BEST_COMPARE_COLORS[role],
+				edgecolor="white", linewidth=1, label=label,
+				error_kw={"elinewidth": 1, "ecolor": "#3d3d3a"},
+			)
+			for position, mean in zip(positions, means):
+				if not np.isnan(mean) and mean > 0.12:
+					axis.text(position, 0.03, f"{mean:.2f}", ha="center", va="bottom",
+							  fontsize=11, color="white", fontweight="bold")
+		axis.set_xticks(range(len(metric_keys)), [title for _, title in BEST_MACRO_METRICS], fontsize=13)
+		axis.tick_params(axis="y", labelsize=14)
+		axis.set_title(f"Test: {test_set}" + (" (selected model is the baseline)" if baseline == best_model else ""),
+					   fontsize=16)
+		axis.grid(axis="y", alpha=0.25)
+		axis.set_axisbelow(True)
+		axis.axhline(0, color="#3d3d3a", linewidth=0.8)
+	axes[0, 0].set_ylabel("Score (fold mean ± std)", fontsize=14)
+	axes[0, 0].set_ylim(min(0, low - 0.05), 1.12)
+	legend_entries = {}
+	for axis in axes[0]:
+		for handle, label in zip(*axis.get_legend_handles_labels()):
+			legend_entries.setdefault(label, handle)
+	fig.legend(legend_entries.values(), legend_entries.keys(), loc="lower center",
+			   ncol=len(legend_entries), frameon=False, fontsize=14)
+	fig.suptitle(f"{best_model} vs from-scratch baseline per test survey", fontsize=20)
+	fig.tight_layout(rect=(0, 0.08, 1, 0.93))
+	save_figure(fig, BEST_MODEL_DIR / "best_model_vs_scratch_baseline.png")
+	plt.close(fig)
+
+	# --- Copy the model's ROC figure so everything for the selected model sits in one folder.
+	roc_path = ROC_DIR / f"{re.sub(r'[^A-Za-z0-9._-]+', '_', best_model)}_roc.png"
+	if roc_path.exists():
+		(BEST_MODEL_DIR / "best_model_roc.png").write_bytes(roc_path.read_bytes())
+
+	# --- Console summary.
+	print(f"\nSelected model: {best_model} (highest weighted macro F1)")
+	for row in summary_rows:
+		rank = f"  rank {row['rank']}/{row['models_ranked']}" if row.get("rank") else ""
+		print(f"  {row['test_dataset']:<9}" + "  ".join(
+			f"{key}={row[f'{key}_mean']:.3f}" for key in metric_keys
+		) + rank)
+	print(f"Best-model summaries saved to {BEST_MODEL_DIR}")
+
+
 def main():
 	OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -1302,10 +1826,12 @@ def main():
 		)
 		plot_metric_heatmaps(test_rows)
 		plot_plain_metric_heatmaps(test_rows)
+		plot_per_class_metric_heatmaps(test_rows)
 		write_latex_tables(test_rows)
 		best_models = best_heatmap_models(test_rows)
 		print(f"Best heatmap models (F1): {best_models}")
 		plot_bubble_summaries(best_models, BUBBLE_BEST_DIR)
+		plot_best_model_summary(test_rows, best_models.get("weighted"))
 		print(f"Test metric heatmaps saved to {OUTPUT_DIR}")
 	else:
 		print(f"No test predictions found under {TESTING_DIR}")
