@@ -1,0 +1,127 @@
+# region ABOUT
+# ===================================================================================================
+# > This script handles running five experiments to verify the effect of random augmentations on training data. Each experiment involves splitting the data into training and testing sets, augmenting the training data, and then training a model using the augmented data. The script uses multiprocessing to run each experiment in a separate process, ensuring that memory is cleared between experiments. The results of each experiment are saved in separate directories for later analysis. The script also includes error handling to check for successful completion of each step and to catch any critical errors that may occur during the subprocess execution.
+
+# > Adjusted from manager.py by Dylan Farge.
+# ===================================================================================================
+# endregion
+
+print("\n\n" + "="*160 + "\n" + "="*160 + "\n\n")
+
+# region IMPORTS
+import sys
+import os
+import multiprocessing
+import subprocess
+import numpy as np
+from time import time
+from datetime import datetime
+from masterUtils import check_directory, checkExist
+from masterRunModel import runModel
+from masterDataAugmentation import augmentData, splitData, copySplitData
+# endregion
+
+# region PATHS
+from paths import RESULTSDIRECTORY, SOURCEDATADIRECTORY
+# endregion
+
+# region BOOLS
+from bools import TRAINING
+# endregion
+
+# region MAIN
+def main():
+    if TRAINING: check_directory(RESULTSDIRECTORY)
+    if TRAINING: check_directory(SOURCEDATADIRECTORY, replace=True)
+    
+    start_time = datetime.now()
+    
+    print(f"Starting Master Manager at {start_time.strftime('%Y-%m-%d %H:%M:%S')} \n\n\n")
+    tick = time()
+
+    # === Experiment Setup ===
+    experiments = []
+    LEARNING_RATE_RANGE =  np.logspace(-5, -2, 7) 
+    REGULARISATION_RANGE = np.concatenate(([0.0], np.logspace(-4, -2, 5))) # L2 coefficient on the Dense(500) layer
+    WEIGHT_DECAY_RANGE =  np.logspace(-4, -1, 4)
+
+    epochs = [100]
+    for no_epochs in epochs:
+        for lr in LEARNING_RATE_RANGE:
+            for reg in REGULARISATION_RANGE:
+                for wd in WEIGHT_DECAY_RANGE:
+                    experiments.append((no_epochs, "FIRST", lr, reg, wd))  
+                    experiments.append((no_epochs, "NVSS", lr, reg, wd))  
+                    experiments.append((no_epochs, "LoTSS", lr, reg, wd))  
+                    experiments.append((no_epochs, "FL", lr, reg, wd))  
+                    experiments.append((no_epochs, "LF", lr, reg, wd))  
+                    experiments.append((no_epochs, "FN", lr, reg, wd))  
+                    experiments.append((no_epochs, "NF", lr, reg, wd))  
+                    experiments.append((no_epochs, "LN", lr, reg, wd))  
+                    experiments.append((no_epochs, "NL", lr, reg, wd))  
+                    experiments.append((no_epochs, "FLN", lr, reg, wd))  
+                    experiments.append((no_epochs, "FNL", lr, reg, wd))  
+                    experiments.append((no_epochs, "NLF", lr, reg, wd))  
+                    experiments.append((no_epochs, "NFL", lr, reg, wd))  
+                    experiments.append((no_epochs, "LNF", lr, reg, wd))  
+                    experiments.append((no_epochs, "LFN", lr, reg, wd))  
+
+    # > Format for the sub-script
+    experiments_formatted = [(ep, survey, lr, reg, wd) for ep, survey, lr, reg, wd in experiments]
+    number_of_experiments = len(experiments)
+
+    print(f"Total number of experiments: {number_of_experiments}")
+
+    # === Run Experiments ===
+    try:
+        sourceDataExist = checkExist(SOURCEDATADIRECTORY, num_files=6)
+        if TRAINING:
+            if sourceDataExist == False:
+                splitData(SOURCEDATADIRECTORY) # | Split data into training and testing sets, and do not repeat for every experiment. 
+            else: print(f"Source data already exists in {SOURCEDATADIRECTORY}, proceeding with training.")
+
+        print("~"*160 + "\n")
+        print(f">>>>> Starting Training at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} <<<<< \n")
+        print("~"*160 + "\n")
+
+        EXPERIMENTDIRECTORY = os.path.join(RESULTSDIRECTORY, f"Experiment_0")
+
+        augmentDataExist = checkExist(os.path.join(EXPERIMENTDIRECTORY, "Data"), num_files=7)
+        if TRAINING:
+            if augmentDataExist == False:
+                copySplitData(SOURCEDATADIRECTORY, EXPERIMENTDIRECTORY) # Copy source data into experiment folder
+                augmentData(os.path.join(EXPERIMENTDIRECTORY, "Data")) # Augment the data in the experiment folder 
+            else: print(f"Augmented data already exists in {os.path.join(EXPERIMENTDIRECTORY, 'Data')}, proceeding with training.")
+
+        # > Check that the augmentation process completed successfully by verifying the existence of the expected output files. 
+        required_file = os.path.join(EXPERIMENTDIRECTORY, "Data", "X_train_val.npy")
+        if not os.path.exists(required_file):
+            print(f"ERROR: Augmentation failed! {required_file} not found.")
+            sys.exit(1)
+
+        p = multiprocessing.Process(
+            target=runModel, 
+            args=(experiments_formatted, 0),
+        )
+        
+        p.start()
+        p.join()  
+
+        # > Check if the process crashed
+        if p.exitcode != 0:
+            print(f"CRITICAL: Training crashed with exit code {p.exitcode}")
+            sys.exit(p.exitcode)
+
+        print("~"*160 + "\n")
+        print(f">>>>> Finished Training at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} <<<<< \n")
+        print("~"*160 + "\n")
+
+        print("=" * 160 + "\n" + "=" * 160 + "\n\n")
+    
+    except subprocess.CalledProcessError as e:
+        print(f"CRITICAL ERROR in myRunModel: {e}")
+        sys.exit(1)
+
+if __name__ == "__main__": 
+    multiprocessing.set_start_method('spawn', force=True)
+    main()

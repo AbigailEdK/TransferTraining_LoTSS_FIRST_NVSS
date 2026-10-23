@@ -13,6 +13,7 @@ import sys
 import os
 import multiprocessing
 import subprocess
+import numpy as np
 from time import time
 from datetime import datetime
 from masterUtils import check_directory, checkExist
@@ -33,7 +34,6 @@ def main():
     if TRAINING: check_directory(RESULTSDIRECTORY)
     if TRAINING: check_directory(SOURCEDATADIRECTORY, replace=True)
     
-    num_experiments = 5
     start_time = datetime.now()
     
     print(f"Starting Master Manager at {start_time.strftime('%Y-%m-%d %H:%M:%S')} \n\n\n")
@@ -41,15 +41,36 @@ def main():
 
     # === Experiment Setup ===
     experiments = []
+    LEARNING_RATE_RANGE =  np.logspace(-5, -2, 7) 
+    REGULARISATION_RANGE = np.linspace(0.0, 0.5, 8)            
+    WEIGHT_DECAY_RANGE =  np.logspace(-4, -1, 4)
 
-    epochs = [60]
+    epochs = [100]
     for no_epochs in epochs:
-        experiments.append((no_epochs, "FIRST", 0.00039, 0.40))  
-        experiments.append((no_epochs, "NVSS", 0.00039, 0.26))  
-        experiments.append((no_epochs, "LOFAR", 0.00039, 0.52))  
+        for lr in LEARNING_RATE_RANGE:
+            for reg in REGULARISATION_RANGE:
+                for wd in WEIGHT_DECAY_RANGE:
+                    experiments.append((no_epochs, "FIRST", lr, reg, wd))  
+                    experiments.append((no_epochs, "NVSS", lr, reg, wd))  
+                    experiments.append((no_epochs, "LoTSS", lr, reg, wd))  
+                    experiments.append((no_epochs, "FL", lr, reg, wd))  
+                    experiments.append((no_epochs, "LF", lr, reg, wd))  
+                    experiments.append((no_epochs, "FN", lr, reg, wd))  
+                    experiments.append((no_epochs, "NF", lr, reg, wd))  
+                    experiments.append((no_epochs, "LN", lr, reg, wd))  
+                    experiments.append((no_epochs, "NL", lr, reg, wd))  
+                    experiments.append((no_epochs, "FLN", lr, reg, wd))  
+                    experiments.append((no_epochs, "FNL", lr, reg, wd))  
+                    experiments.append((no_epochs, "NLF", lr, reg, wd))  
+                    experiments.append((no_epochs, "NFL", lr, reg, wd))  
+                    experiments.append((no_epochs, "LNF", lr, reg, wd))  
+                    experiments.append((no_epochs, "LFN", lr, reg, wd))  
 
     # > Format for the sub-script
-    experiments_formatted = [(ep, survey, lr, reg) for ep, survey, lr, reg in experiments]
+    experiments_formatted = [(ep, survey, lr, reg, wd) for ep, survey, lr, reg, wd in experiments]
+    number_of_experiments = len(experiments)
+
+    print(f"Total number of experiments: {number_of_experiments}")
 
     # === Run Experiments ===
     try:

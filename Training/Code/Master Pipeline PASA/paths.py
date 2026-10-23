@@ -1,0 +1,17 @@
+import os
+
+HOME_DIR = os.path.expanduser("~")
+# HOME_DIR = os.path.join(HOME_DIR, "Desktop") # ! UNCOMMENT THIS FOR LOCAL USE
+PROJECT_ROOT = os.path.join(HOME_DIR, "PASA_Paper_Code", "Training")
+DATA_ROOT = os.path.dirname(PROJECT_ROOT)
+MANAGER = os.path.join(PROJECT_ROOT, "Code", "Master Pipeline PASA", "masterManager.py")
+RUNMODEL = os.path.join(PROJECT_ROOT, "Code", "Master Pipeline PASA", "masterRunModel.py")
+AUGMENTDATA = os.path.join(PROJECT_ROOT, "Code", "Master Pipeline PASA", "masterDataAugmentation.py")
+RESULTSDIRECTORY = os.path.join(PROJECT_ROOT, "Results")
+SOURCEDATADIRECTORY = os.path.join(RESULTSDIRECTORY, "SourceData")
+
+FITS_DIR = os.path.join(DATA_ROOT, "Data", "FITS_BY_CHANNEL")
+SOURCE_DIR = os.path.join(DATA_ROOT, "Data", "DATA_SOURCES")
+CATALOG_FILE = os.path.join(DATA_ROOT, "Data", "RADCAT.csv")
+REVIEW_FILE = os.path.join(DATA_ROOT, "Morphology Review", "morphology_review_progress.json") # FIRST/LoTSS morphology review (morphologyReview.py)
+

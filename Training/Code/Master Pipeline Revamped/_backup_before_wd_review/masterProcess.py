@@ -101,19 +101,6 @@ def get_dataset(kind, cf):
         names
     ]
 
-def _get_available_base_epochs(base_model, training_dir):
-    pattern = re.compile(rf'baseNONE_model{base_model}_set{base_model}_base(\d+)e_(\d+)e_.*')
-    epochs = []
-    try:
-        for folder in Path(training_dir).iterdir():
-            if folder.is_dir():
-                m = pattern.match(folder.name)
-                if m and m.group(1) == m.group(2):
-                    epochs.append(int(m.group(1)))
-    except FileNotFoundError:
-        print(f"Warning: Training directory {training_dir} not found.")
-    return sorted(set(epochs))
-
 def get_channels(surveys):
     '''
     ARGUMENTS:
@@ -145,19 +132,128 @@ def get_channels(surveys):
     - 4 = White Noise
 
     SELECTIONS:
-    - FREP = FIRST repeated across all three channels (for single-channel models) {FREP}
-    - FZER = FIRST with channels 1 and 2 filled with zeros {FZER}
-    - FNSE = FIRST with channels 1 and 2 filled with white noise {FNSE}
-    - LREP = LOFAR repeated across all three channels (for single-channel models) {LREP}
-    - LZER = LOFAR with channels 0 and 2 filled with zeros {LZER}
-    - LNSE = LOFAR with channels 0 and 2 filled with white noise {LNSE}
-    - NREP = NVSS repeated across all three channels (for single-channel models) {NREP}
-    - NZER = NVSS with channels 0 and 1 filled with zeros {NZER}
-    - NNSE = NVSS with channels 0 and 1 filled with white noise {NNSE}
-    - RADCAT = RADCAT (combined channels 0, 1 and 2) {RADCAT}
+    - FL: FIRST and LOFAR
+    - LF: LOFAR and FIRST
+    - FN: FIRST and NVSS
+    - NF: NVSS and FIRST
+    - LN: LOFAR and NVSS
+    - NL: NVSS and LOFAR
+    - FLN: FIRST, LOFAR and NVSS
+    - FNL: FIRST, NVSS and LOFAR
+    - NLF: NVSS, LOFAR and FIRST
+    - NFL: NVSS, FIRST and LOFAR
+    - LNF: LOFAR, NVSS and FIRST
+    - LFN: LOFAR, FIRST and NVSS
+    - FREP2: FIRST repeated across two channels
+    - FREP3: FIRST repeated across three channels
+    - FZER2_CH1: FIRST with zeros in channel 1
+    - FZER2_CH2: FIRST with zeros in channel 2
+    - FZER3_CH1: FIRST with zeros in channel 1 (three channels)
+    - FZER3_CH2: FIRST with zeros in channel 2 (three channels)
+    - FZER3_CH3: FIRST with zeros in channel 3 (three channels)
+    - FNSE2: FIRST with white noise in channel 1
+    - FNSE2_CH2: FIRST with white noise in channel 2
+    - FNSE3_CH1: FIRST with white noise in channel 1 (three channels)
+    - FNSE3_CH2: FIRST with white noise in channel 2 (three channels)
+    - FNSE3_CH3: FIRST with white noise in channel 3 (three channels)
+    - LREP2: LOFAR repeated across two channels
+    - LREP3: LOFAR repeated across three channels
+    - LZER2: LOFAR with zeros in channel 1
+    - LZER2_CH2: LOFAR with zeros in channel 2
+    - LZER3_CH1: LOFAR with zeros in channel 1 (three channels)
+    - LZER3_CH2: LOFAR with zeros in channel 2 (three channels)
+    - LZER3_CH3: LOFAR with zeros in channel 3 (three channels)
+    - LNSE2: LOFAR with white noise in channel 1
+    - LNSE2_CH2: LOFAR with white noise in channel 2
+    - LNSE3_CH1: LOFAR with white noise in channel 1 (three channels)
+    - LNSE3_CH2: LOFAR with white noise in channel 2 (three channels)
+    - LNSE3_CH3: LOFAR with white noise in channel 3 (three channels)
+    - NZER2: NVSS with zeros in channel 1
+    - NZER2_CH2: NVSS with zeros in channel 2
+    - NZER3_CH1: NVSS with zeros in channel 1 (three channels)
+    - NZER3_CH2: NVSS with zeros in channel 2 (three channels)
+    - NZER3_CH3: NVSS with zeros in channel 3 (three channels)
+    - NNSE2: NVSS with white noise in channel 1
+    - NNSE2_CH2: NVSS with white noise in channel 2
+    - NNSE3_CH1: NVSS with white noise in channel 1 (three channels)
+    - NNSE3_CH2: NVSS with white noise in channel 2 (three channels)
+    - NNSE3_CH3: NVSS with white noise in channel 3 (three channels)
     '''
 
-    channel_map = {"FIRST": [0], "LOFAR": [1], "NVSS": [2], "ZEROS": [3], "WN": [4], "FREP": [0, 0, 0], "FZER": [0, 3, 3], "FNSE": [0, 4, 4], "LREP": [1, 1, 1], "LZER": [3, 1, 3], "LNSE": [4, 1, 4], "NREP": [2, 2, 2], "NZER": [3, 3, 2], "NNSE": [4, 4, 2], "RADCAT": [0, 1, 2]}
+    channel_map = {"FIRST": [0], "LoTSS": [1], "NVSS": [2], "ZEROS": [3], "WN": [4], 
+                   # > Duo channel selections
+                   "FL": [0, 1], 
+                   "LF": [1, 0], 
+                   "FN": [0, 2], 
+                   "NF": [2, 0], 
+                   "LN": [1, 2], 
+                   "NL": [2, 1], 
+
+                   # > Trio channel selections
+                   "FLN": [0, 1, 2], 
+                   "FNL": [0, 2, 1], 
+                   "NLF": [2, 0, 1], 
+                   "NFL": [2, 1, 0], 
+                   "LNF": [1, 2, 0], 
+                   "LFN": [1, 0, 2], 
+
+                    # = TESTING FOR FIRST =
+                    # > Testing for FIRST repeated
+                   "FREP2": [0, 0], 
+                   "FREP3": [0, 0, 0], 
+
+                    # > Testing for FIRST with zeros
+                   "FZER2_CH1": [0, 3], 
+                   "FZER2_CH2": [3, 0], 
+                   "FZER3_CH1": [0, 3, 3], 
+                   "FZER3_CH2": [3, 0, 3], 
+                   "FZER3_CH3": [3, 3, 0], 
+
+                    # > Testing for FIRST with white noise
+                   "FNSE2": [0, 4], 
+                   "FNSE2_CH2": [4, 0], 
+                   "FNSE3_CH1": [0, 4, 4], 
+                   "FNSE3_CH2": [4, 0, 4], 
+                   "FNSE3_CH3": [4, 4, 0], 
+
+                    # = TESTING FOR LOFAR =
+                    # > Testing for LOFAR repeated
+                   "LREP2": [1, 1], 
+                   "LREP3": [1, 1, 1], 
+
+                   # > Testing for LOFAR with zeros
+                   "LZER2": [3, 1], 
+                   "LZER2_CH2": [1, 3], 
+                   "LZER3_CH1": [1, 3, 3], 
+                   "LZER3_CH2": [3, 1, 3], 
+                   "LZER3_CH3": [3, 3, 1], 
+
+                   # > Testing for LOFAR with white noise
+                   "LNSE2_CH1": [4, 1], 
+                   "LNSE2_CH2": [1, 4], 
+                   "LNSE3_CH1": [1, 4, 4], 
+                   "LNSE3_CH2": [4, 1, 4], 
+                   "LNSE3_CH3": [4, 4, 1], 
+
+                   # = TESTING FOR NVSS =
+                   # > Testing for NVSS repeated
+                   "NREP2": [2, 2], 
+                   "NREP3": [2, 2, 2], 
+
+                   # > Testing for NVSS with zeros
+                   "NZER2": [3, 2], 
+                   "NZER2_CH2": [2, 3], 
+                   "NZER3_CH1": [2, 3, 3], 
+                   "NZER3_CH2": [3, 2, 3], 
+                   "NZER3_CH3": [3, 3, 2], 
+
+                   # > Testing for NVSS with white noise
+                   "NNSE2_CH1": [4, 2], 
+                   "NNSE2_CH2": [2, 4], 
+                   "NNSE3_CH1": [2, 4, 4], 
+                   "NNSE3_CH2": [4, 2, 4], 
+                   "NNSE3_CH3": [4, 4, 2], 
+                   }
 
     print(f"Selected surveys: {surveys}")
     print(f"Corresponding channels: {channel_map[surveys]}")
@@ -186,14 +282,6 @@ def get_folds(X, y, val_split, random_state):
 
     stratified_kfold = StratifiedKFold(n_splits=int(1/val_split), random_state=random_state, shuffle=True)
     return [[t,v] for t,v in stratified_kfold.split(X, y)]
-
-def get_model_path(cf, fold=None):
-
-    model_str = str(cf.MODEL)
-    surveys_str = ''.join(x[:4] for x in cf.MODEL)
-    epoch_str = f"{cf.EPOCHS}e"
-
-    return cf.MODEL_DIR + "model" + model_str + "_set" + surveys_str + "_" + epoch_str + "_" + str(cf.LEARNING_RATE) + "l_" + str(cf.REGULARISATION) + "r/" 
 
 def build_dataset(X, y, names, indices, cf, size_per_type):
     '''
@@ -235,7 +323,7 @@ def build_dataset(X, y, names, indices, cf, size_per_type):
 
 
 
-def folder_construct(base_model, model, surveys, lr, base_reg, reg, epoch_ceiling, save_dir=RESULTSDIRECTORY):
+def folder_construct(base_model, model, surveys, lr, base_reg, reg, wd, epoch_ceiling, save_dir=RESULTSDIRECTORY):
     '''
     ARGUMENTS:
     ----------
@@ -245,6 +333,7 @@ def folder_construct(base_model, model, surveys, lr, base_reg, reg, epoch_ceilin
         > surveys: a list of survey names
         > lr: the learning rate
         > reg: the regularization parameter
+        > wd: the weight decay parameter
 
     RETURNS:
     --------
@@ -254,13 +343,13 @@ def folder_construct(base_model, model, surveys, lr, base_reg, reg, epoch_ceilin
     DESCRIPTION:
     ------------
         This function constructs the expected folder path for saving results based on the model, epochs, surveys, learning rate, regularization parameter, and save directory specified in the configuration. The folder path is constructed in the format:
-        "{save_dir}/{model}_{surveys_str}_{epochs}e_{lr}l_{reg}r/"
+        "{save_dir}/base{base_model}_target{model}_dataset{surveys}_{lr}l_base{base_reg}r_{reg}r_ceiling{epoch_ceiling}e/"
         where surveys_str is a concatenation of the survey names in the surveys list. The function returns the constructed folder path.
     '''
 
     # return f"{save_dir.rstrip('/')}/base{base_model}_model{model}_set{surveys}_base{base_epochs}e_{epochs}e_{lr}l_base{base_reg}r_{reg}r/"
 
-    return f"{save_dir.rstrip('/')}/base{base_model}_target{model}_dataset{surveys}_{lr}l_base{base_reg}r_{reg}r_ceiling{epoch_ceiling}e/"
+    return f"{save_dir.rstrip('/')}/base{base_model}_target{model}_dataset{surveys}_{lr}l_base{base_reg}r_{reg}r_ceiling{epoch_ceiling}e_wd{wd}/"
 
 def clearTransferLearningFolders(folders):
 
@@ -295,15 +384,12 @@ def extract_parameters_from_folder_name(folder_name):
         The function returns a dictionary containing the extracted parameters.
     '''
 
-    #  e.g. baseNONE_modelRADCAT_setRADCAT_base25e_25e_0.00039l_base0.54r_0.54r
-    # * e.g. baseNONE_modelRADCAT_setRADCAT_0.00039l_base0.54r_0.54r
-
     # pattern = re.compile(
     #     r'base(\w+)_model(\w+)_set(\w+)_base(\d+)e_(\d+)e_([\d.]+(?:e-?\d+)?)l_base([\d.]+)r_([\d.]+)r'
     # )
     
     pattern = re.compile(
-        r'base(\w+)_target(\w+)_dataset(\w+)_([\d.]+(?:e-?\d+)?)l_base([\d.]+)r_([\d.]+)r_ceiling(\d+)e'
+        r'base(\w+)_target(\w+)_dataset(\w+)_([\d.]+(?:e-?\d+)?)l_base([\d.]+)r_([\d.]+)r_ceiling(\d+)e_wd([\d.]+)'
     )    
     
     match = pattern.match(folder_name)
@@ -317,7 +403,8 @@ def extract_parameters_from_folder_name(folder_name):
         "lr": float(match.group(4)),          # Python float() natively parses '3.9e-05' perfectly
         "base_reg": float(match.group(5)),
         "reg": float(match.group(6)),
-        "epoch_ceiling": int(match.group(7))
+        "epoch_ceiling": int(match.group(7)),
+        "wd": float(match.group(8))
     }
 
     # | MODEL = model, 
@@ -338,157 +425,5 @@ def extract_parameters_from_folder_name(folder_name):
     # | BASE_EPOCH = base_epoch,
     
     return parameters
-
-def restructure_results_by_epoch(results_dir):
-    """
-    Creates separate top-level experiment folders for each epoch threshold.
-    Moves model files to their respective epoch folders, and sweeps all other 
-    remaining files (logs, plots, metadata) into the maximum epoch directory.
-    """
-    base_path = Path(results_dir)
-    if not base_path.exists():
-        raise FileNotFoundError(f"Directory {results_dir} does not exist.")
-
-    # Matches: (prefix)_base(digits)e_(digits)e_(suffix)
-    exp_dir_pattern = re.compile(r'^(.*?)_base\d+e_\d+e_([^\/]+)$')
-    checkpoint_pattern = re.compile(r'model_(\d+)e_fold_(\d+)\.keras')
-
-    for exp_dir in list(base_path.iterdir()):
-        if not exp_dir.is_dir():
-            continue
-
-        match = exp_dir_pattern.match(exp_dir.name)
-        if not match:
-            continue
-        
-        dir_prefix = match.group(1)   # e.g., "baseCNN_modelV1_setLOFAR"
-        dir_suffix = match.group(2)   # e.g., "0.001l_1e-4r"
-        
-        print(f"\nParsing parent experiment: {exp_dir.name}")
-
-        # 1. Map model checkpoints and discover what epochs exist
-        checkpoint_files = list(exp_dir.glob("model_*e_fold_*.keras"))
-        found_epochs = sorted(list(set(
-            int(checkpoint_pattern.match(f.name).group(1)) 
-            for f in checkpoint_files if checkpoint_pattern.match(f.name)
-        )))
-
-        if not found_epochs:
-            print(f"-> No valid model checkpoints found in {exp_dir.name}. Skipping.")
-            continue
-
-        max_epoch = max(found_epochs)
-        
-        # Determine the target directory path for the maximum epoch run
-        max_epoch_dir = base_path / f"{dir_prefix}_base{max_epoch}e_{max_epoch}e_{dir_suffix}"
-
-        # 2. PROCESS AND MOVE CHECKPOINTS
-        for file in checkpoint_files:
-            file_match = checkpoint_pattern.match(file.name)
-            if not file_match:
-                continue
-                
-            epoch = int(file_match.group(1))
-            fold = file_match.group(2)
-            
-            new_dir_name = f"{dir_prefix}_base{epoch}e_{epoch}e_{dir_suffix}"
-            new_exp_dir = base_path / new_dir_name
-            new_exp_dir.mkdir(parents=True, exist_ok=True)
-            
-            dest_file = new_exp_dir / f"model_fold_{fold}.keras"
-            file.rename(dest_file)
-
-        # 3. SWEEP ALL REMAINING FILES INTO THE MAX EPOCH DIRECTORY
-        # Ensure the max epoch directory is instantiated
-        max_epoch_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Collect everything left over (non-checkpoint files, logs, metadata, plots)
-        remaining_files = [f for f in exp_dir.iterdir() if f.is_file()]
-        
-        for file in remaining_files:
-            # If the source folder isn't already the max epoch folder, migrate the file
-            if exp_dir != max_epoch_dir:
-                file.rename(max_epoch_dir / file.name)
-
-        # 4. TEARDOWN SOURCE FOLDER IF EMPTY
-        if exp_dir != max_epoch_dir:
-            if not any(exp_dir.iterdir()):
-                exp_dir.rmdir()
-                print(f"Cleaned up temporary source directory: {exp_dir.name}")
-            else:
-                print(f"Warning: Source directory {exp_dir.name} contains unexpected subdirectories and was not removed.")
-
-    print("\nRestructuring execution complete.\n" + "="*80)
-
-def _safe_load_model(model_path):
-    '''
-    ARGUMENTS:
-    ----------
-        > model_path: Path to the .keras model file to load.
-
-    RETURN:
-    -------
-        > model: The loaded Keras model.
-
-    DESCRIPTION:
-    ------------
-        Safely loads a Keras model that may have been saved with older versions of Keras/TensorFlow
-        that used deprecated optimizer configuration parameters (jit_compile, is_legacy_optimizer).
-        Loads without compiling first, then recompiles with a fresh Adam optimizer.
-    '''
-    import json
-    import zipfile
-    import tempfile
-    import shutil
-    
-    try:
-        # First attempt: try loading normally
-        return tf.keras.models.load_model(model_path)
-    except ValueError as e:
-        if "Argument(s) not recognized" in str(e) and ("jit_compile" in str(e) or "is_legacy_optimizer" in str(e)):
-            print(f"Detected deprecated optimizer parameters. Loading model without compilation...")
-            
-            # Extract and modify the model.json to remove problematic optimizer configs
-            with tempfile.TemporaryDirectory() as tmpdir:
-                with zipfile.ZipFile(model_path, 'r') as zip_ref:
-                    zip_ref.extractall(tmpdir)
-                
-                # Modify the model config to remove optimizer compilation config
-                config_path = os.path.join(tmpdir, 'model.json')
-                if os.path.exists(config_path):
-                    with open(config_path, 'r') as f:
-                        config = json.load(f)
-                    
-                    # Remove the entire optimizer_config from compile_config to force fresh compilation
-                    if 'config' in config and 'compile_config' in config['config']:
-                        config['config']['compile_config'] = None
-                    
-                    with open(config_path, 'w') as f:
-                        json.dump(config, f)
-                
-                # Re-create the zip file
-                temp_model_path = os.path.join(tmpdir, 'model_fixed.keras')
-                with zipfile.ZipFile(temp_model_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                    for root, dirs, files in os.walk(tmpdir):
-                        for file in files:
-                            if file != 'model_fixed.keras':
-                                file_path = os.path.join(root, file)
-                                arcname = os.path.relpath(file_path, tmpdir)
-                                zipf.write(file_path, arcname)
-                
-                # Load model without compiling
-                model = tf.keras.models.load_model(temp_model_path, compile=False)
-                
-                # Recompile with fresh optimizer
-                model.compile(
-                    optimizer=Adam(learning_rate=0.00039),
-                    loss='categorical_crossentropy',
-                    metrics=['accuracy']
-                )
-                
-                print(f"Successfully loaded and recompiled model.")
-                return model
-        else:
-            raise
 
 # endregion

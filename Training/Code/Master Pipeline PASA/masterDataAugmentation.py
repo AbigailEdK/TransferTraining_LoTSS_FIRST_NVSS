@@ -7,6 +7,7 @@
 # endregion
 
 # region IMPORTS
+import json
 import shutil
 import numpy as np
 import os
@@ -18,7 +19,7 @@ from tensorflow.keras.layers import RandomFlip, RandomRotation
 # endregion
 
 # region PATHS
-from paths import CATALOG_FILE, FITS_DIR
+from paths import CATALOG_FILE, FITS_DIR, REVIEW_FILE
 # endregion 
 
 # region CONSTANTS
@@ -244,6 +245,45 @@ def fill_partial_images(Xs, sources, save_dir, save_files):
         if save_files:
             np.save(save_dir + "filled_partial_names.npy", list(cut_off_sources))
 
+def remove_noisy_images(Xs, y, sources, data_dir, save_files=False, review_file=REVIEW_FILE):
+    '''
+    ARGUMENTS:
+    ----------
+        > Xs: a list of numpy arrays containing the image data, each of shape (num_sources, width, height, num_channels).
+        > y: a numpy array containing the morphology type of each source.
+        > sources: a numpy array containing the names (IDs) of each source.
+        > data_dir: the directory where the list of removed sources is saved.
+        > save_files: a boolean indicating whether the list of removed sources should be saved to disk.
+        > review_file: the progress file written by morphologyReview.py, holding a "yes" / "no" / "skip" decision per source.
+
+    RETURNS:
+    --------
+        > Xs, y, sources: the inputs with every source marked "no" in the review removed.
+
+    DESCRIPTION:
+    ------------
+    Removes the sources whose FIRST and LoTSS images were judged not to show the same morphology in the manual review (morphologyReview.py). Sources marked "yes" or "skip", and sources missing from the review, are kept. The removal happens before the train/test split, so neither set contains a rejected source.
+    '''
+    if not os.path.exists(review_file):
+        raise FileNotFoundError(f"Morphology review file not found: {review_file}")
+
+    with open(review_file, "r", encoding="utf-8") as f:
+        decisions = {int(source): decision for source, decision in json.load(f)["decisions"].items()}
+
+    rejected = np.array([decisions.get(int(source)) == "no" for source in sources])
+    unreviewed = [source for source in sources if int(source) not in decisions]
+    if len(unreviewed) > 0:
+        print(f"WARNING: {len(unreviewed)} sources have no review decision and are kept: {unreviewed}")
+
+    print(f"Removing {rejected.sum()}/{len(sources)} sources marked 'no' in the morphology review.")
+    print_distribution(y[rejected], "Removed Sources", total_images=len(y))
+
+    if save_files:
+        np.save(data_dir + "noisy_names.npy", sources[rejected])
+
+    keep = ~rejected
+    return [X[keep] for X in Xs], y[keep], sources[keep]
+
 def print_distribution(dataset, dataset_name, total_images=None, spacing=20):
     total_images = len(dataset) if total_images is None else total_images
     print(f"\n--- {dataset_name} Distribution ---")
@@ -392,6 +432,7 @@ def splitData(data_dir):
 
     check_empty_image_error(Xs, names)
     fill_partial_images(Xs, names, data_dir, save_files=SAVE_FILES)
+    Xs, y, names = remove_noisy_images(Xs, y, names, data_dir, save_files=SAVE_FILES)
 
     print("Splitting data into training/validation and testing sets...")
     train_val_index, test_index = train_test_split(range(len(y)), test_size=0.2, random_state=100, stratify=y)
