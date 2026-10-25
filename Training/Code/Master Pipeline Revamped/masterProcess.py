@@ -89,7 +89,8 @@ def get_dataset(kind, cf):
 
     DATA_SOURCES = find_data(cf.EXPERIMENT_NUMBER)
 
-    X = np.load(f"{DATA_SOURCES}/X_{kind}.npy")[:, :, :, channels]
+    # > float32 halves the memory of the arrays (and of the tensors copied to the GPU); Keras trains in float32 anyway
+    X = np.load(f"{DATA_SOURCES}/X_{kind}.npy")[:, :, :, channels].astype(np.float32)
 
     y = np.load(f"{DATA_SOURCES}/y_{kind}.npy")
 
@@ -210,7 +211,7 @@ def get_channels(surveys):
                    "FZER3_CH3": [3, 3, 0], 
 
                     # > Testing for FIRST with white noise
-                   "FNSE2": [0, 4], 
+                   "FNSE2_CH1": [0, 4], 
                    "FNSE2_CH2": [4, 0], 
                    "FNSE3_CH1": [0, 4, 4], 
                    "FNSE3_CH2": [4, 0, 4], 
@@ -222,7 +223,7 @@ def get_channels(surveys):
                    "LREP3": [1, 1, 1], 
 
                    # > Testing for LOFAR with zeros
-                   "LZER2": [3, 1], 
+                   "LZER2_CH1": [3, 1], 
                    "LZER2_CH2": [1, 3], 
                    "LZER3_CH1": [1, 3, 3], 
                    "LZER3_CH2": [3, 1, 3], 
@@ -241,7 +242,7 @@ def get_channels(surveys):
                    "NREP3": [2, 2, 2], 
 
                    # > Testing for NVSS with zeros
-                   "NZER2": [3, 2], 
+                   "NZER2_CH1": [3, 2], 
                    "NZER2_CH2": [2, 3], 
                    "NZER3_CH1": [2, 3, 3], 
                    "NZER3_CH2": [3, 2, 3], 

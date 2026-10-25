@@ -17,7 +17,7 @@ def check_directory(folder_path, replace=True):
         print(f"Folder {folder_path} replaced successfully.")
         return True
         
-    else:
+    elif not os.path.exists(folder_path):
         os.makedirs(folder_path)
         print(f"Folder {folder_path} created successfully.")
         return True

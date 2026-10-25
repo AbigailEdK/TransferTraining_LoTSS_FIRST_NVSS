@@ -2,3 +2,6 @@
 /.vscode
 */Results
 /Source_PNGs
+*pycache*
+*.git*
+

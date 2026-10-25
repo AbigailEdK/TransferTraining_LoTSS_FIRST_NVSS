@@ -126,7 +126,8 @@ def run_experiment(X_train_val, y_train_val, X_test, names_train_val, folds, cf)
     losses = []
     best_epochs = []
     
-    for kfold, (train_idx, val_idx) in enumerate(folds):
+    # > MAX_FOLDS limits how many of the folds are trained (fewer during the COARSE search stage)
+    for kfold, (train_idx, val_idx) in enumerate(folds[:cf.MAX_FOLDS]):
         print(f"\n>>>>>Training Fold {kfold+1}<<<<<<\n\n")
 
         if np.isnan(X_train_val).any():
@@ -296,7 +297,7 @@ def run_transfer_learning(X_train_val, y_train_val, X_test, names_train_val, fol
     losses = []
     best_fine_tune_epochs = []
     
-    for kfold, (train_idx, val_idx) in enumerate(folds):
+    for kfold, (train_idx, val_idx) in enumerate(folds[:cf.MAX_FOLDS]):
         print(f"\n>>>>>Training Fold {kfold+1}<<<<<<\n\n")
 
         if np.isnan(X_train_val).any():
@@ -323,7 +324,8 @@ def run_transfer_learning(X_train_val, y_train_val, X_test, names_train_val, fol
 
         print("Training model output layer...")
 
-        loss = model.fit(
+        training_start = perf_counter()
+        head_loss = model.fit(
                     X_train, encoded_y_train,
                     validation_data=(X_val, encoded_y_val),
                     epochs=5,
@@ -358,6 +360,8 @@ def run_transfer_learning(X_train_val, y_train_val, X_test, names_train_val, fol
             callbacks=[early_stopping]
         ).history
 
+        training_time_seconds = perf_counter() - training_start
+
         best_phase2_epoch = int(np.argmin(loss['val_loss'])) + 1
         total_best_epoch = 5 + best_phase2_epoch
         best_fine_tune_epochs.append(total_best_epoch)
@@ -371,6 +375,8 @@ def run_transfer_learning(X_train_val, y_train_val, X_test, names_train_val, fol
         
         # 1. Save historical performance metrics (loss, accuracy vectors)
         np.save(f"{cf.SAVE_DIR}/loss_fold_{kfold+1}", loss)
+        np.save(f"{cf.SAVE_DIR}/head_loss_fold_{kfold+1}", head_loss) # | Phase 1 (output layer only) history
+        np.save(f"{cf.SAVE_DIR}/training_time_fold_{kfold+1}", training_time_seconds) # | Both phases
         
         # 2. Save dynamic sample indexes to ensure deterministic offline validation slicing
         np.save(f"{cf.SAVE_DIR}/names_train_fold_{kfold+1}", names_train)
@@ -514,12 +520,18 @@ class SpecificEpochCheckpoint(Callback):
 # endregion
 
 # region MAIN
-def runModel(experiments, experiment_number):
+def runModel(experiments, experiment_number, stage="FINAL", max_folds=None, run_transfer=True, run_testing=True, only_folder=None):
     '''
     ARGUMENTS:
     ----------
         > experiments: List of experiment parameters.
         > experiment_number: Number of the experiment to run.
+        > stage: "COARSE", "FINE" or "FINAL". Search stages save to their own Search_<stage> folder; FINAL saves to the experiment folder itself.
+        > max_folds: how many cross-validation folds to train (None trains all of them).
+        > run_transfer: whether to run transfer learning after training.
+        > run_testing: whether to test the models on the test set after training.
+        > only_folder: a single training folder to run transfer learning from or to test. masterManager.py runs every
+          folder in its own process, so GPU memory is fully released between runs. None processes every folder.
 
     RETURN:
     -------
@@ -536,6 +548,8 @@ def runModel(experiments, experiment_number):
     target_models_duo_channel = ["FL", "LF", "FN", "NF", "LN", "NL"]
     target_models_trio_channel = ["FLN", "FNL", "LNF", "LFN", "NLF", "NFL"]
     RESULTSDIRECTORY = os.path.join(PROJECT_ROOT, "Results", "Experiment_" + str(experiment_number))
+    if stage != "FINAL":
+        RESULTSDIRECTORY = os.path.join(RESULTSDIRECTORY, f"Search_{stage}")
     
     config = dict(
         IGNORE_WARNINGS = True,
@@ -556,6 +570,12 @@ def runModel(experiments, experiment_number):
                 print("\n" + "="*80)
                 print(f"\nRunning training for sub-experiment {i+1}/{len(experiments)}.")
 
+                # > Skip configs that already finished (best_epoch is saved last), so a crashed run can be restarted
+                finished_marker = os.path.join(process.folder_construct(base_model="NONE", model=surveys, surveys=surveys, lr=lr, base_reg=reg, reg=reg, wd=wd, epoch_ceiling=epoch_ceiling, save_dir=os.path.join(config["SAVE_DIR"], "Training/")), "best_epoch.npy")
+                if os.path.exists(finished_marker):
+                    print(f"Already trained, skipping: {os.path.dirname(finished_marker)}")
+                    continue
+
                 print_training_parameters(experiment_number, epoch_ceiling, surveys, lr, reg, wd)
 
                 experiment(
@@ -574,6 +594,7 @@ def runModel(experiments, experiment_number):
                     BASE_REGULARISATION = reg,
                     TRANSFER_LEARNING = False,
                     WEIGHT_DECAY = wd,
+                    MAX_FOLDS = max_folds,
                 )
 
                 K.clear_session()
@@ -583,7 +604,7 @@ def runModel(experiments, experiment_number):
             
             # Move all intermediate models into their own folders
             # process.restructure_results_by_epoch(os.path.join(RESULTSDIRECTORY, "Training/"))
-            transfer_learning = True
+            transfer_learning = run_transfer
 
 # region TFER LEARN
     # * ================================== TRANSFER LEARNING LOGIC ==================================
@@ -594,10 +615,12 @@ def runModel(experiments, experiment_number):
             
             transfer_counter = 1
             
-            folders = list(MODEL_PATH.iterdir())
-            print(f"Folders to parse: {[folder.name for folder in folders]}")
-
-            folders = process.clearTransferLearningFolders(folders)
+            if only_folder is not None:
+                folders = [Path(only_folder)]
+            else:
+                folders = list(MODEL_PATH.iterdir())
+                print(f"Folders to parse: {[folder.name for folder in folders]}")
+                folders = process.clearTransferLearningFolders(folders)
 
             for folder in folders:
                 if folder.is_dir():
@@ -632,6 +655,12 @@ def runModel(experiments, experiment_number):
 
                     for target_model in target_models:
                         if target_model != base_model: # if base model =! model to train
+                            # > Skip transfer runs that already finished (best_epoch is saved last), so a crashed run can be restarted
+                            finished_marker = os.path.join(process.folder_construct(base_model=base_model, model=target_model, surveys=target_model, lr=transfer_parameters["lr"]/10, base_reg=transfer_parameters["base_reg"], reg=transfer_parameters["reg"], wd=transfer_parameters["wd"], epoch_ceiling=transfer_parameters["epoch_ceiling"], save_dir=os.path.join(config["SAVE_DIR"], "Training/")), "best_epoch.npy")
+                            if os.path.exists(finished_marker):
+                                print(f"Already trained, skipping: {os.path.dirname(finished_marker)}")
+                                continue
+
                             print(f"Preparing to train target model {target_model} using base model {base_model} ...")
 
                             print_transfer_learning_parameters(experiment_number=experiment_number, epoch_ceiling=transfer_parameters['epoch_ceiling'], surveys=target_model, lr=transfer_parameters['lr'], reg=transfer_parameters['reg'], base_model=base_model, base_reg=transfer_parameters['base_reg'], wd=transfer_parameters['wd'])
@@ -656,6 +685,7 @@ def runModel(experiments, experiment_number):
                                 MODEL_DIR = MODEL_DIRECTORY,
                                 WEIGHT_DECAY = transfer_parameters["wd"],
                                 BASE_WEIGHT_DECAY = transfer_parameters["wd"],
+                                MAX_FOLDS = max_folds,
                             )
 
                             K.clear_session()
@@ -664,8 +694,8 @@ def runModel(experiments, experiment_number):
                             print(f"\n>>>>> Finished transfer learning run {transfer_counter}: target {target_model} from base {base_model} <<<<<\n" + "="*80)
                             
                             transfer_counter += 1
-            
-            testing = True
+
+        testing = run_testing
 
 # region TESTING   
     # * ======================================= TESTING LOGIC =======================================
@@ -684,9 +714,10 @@ def runModel(experiments, experiment_number):
             raise FileNotFoundError(f"The path {MODEL_DIRECTORY} is not a valid directory.")
 
         # .iterdir() yields both files and directories; .is_dir() filters for folders only
-        for folder in MODEL_PATH.iterdir():
+        test_folders = [Path(only_folder)] if only_folder is not None else list(MODEL_PATH.iterdir())
+        for folder in test_folders:
             if folder.is_dir():
-                print(f"Processing testing for: {folder.name} ({test_counter}/{len(list(MODEL_PATH.iterdir()))})")
+                print(f"Processing testing for: {folder.name} ({test_counter}/{len(test_folders)})")
                 print(f"Absolute path: {folder}")
                 current_dir = str(folder)
                 
@@ -708,6 +739,10 @@ def runModel(experiments, experiment_number):
                 # * PERFORM OTHER TESTING
                 # ========================
                 # > Test on every dataset with the same number of channels as the model
+                target_models_single_channel = ["FIRST", "LoTSS", "NVSS"]  # Replace with actual single-channel models
+                target_models_duo_channel = ["FN", "FL", "FREP2", "FZER2_CH1", "FZER2_CH2", "LF", "LN", "LREP2", "LZER2_CH1", "LZER2_CH2", "LNSE2_CH1", "LNSE2_CH2", "NF", "NL", "NREP2", "NZER2_CH1", "NZER2_CH2", "NNSE2_CH1", "NNSE2_CH2"]     # Replace with actual duo-channel models
+                target_models_trio_channel = ["FLN", "FNL", "NLF", "NFL", "LNF", "LFN", "FREP3", "FZER3_CH1", "FZER3_CH2", "FZER3_CH3", "FNSE3_CH1", "FNSE3_CH2", "FNSE3_CH3", "LREP3", "LZER3_CH1", "LZER3_CH2", "LZER3_CH3", "LNSE3_CH1", "LNSE3_CH2", "LNSE3_CH3", "NREP3", "NZER3_CH1", "NZER3_CH2", "NZER3_CH3", "NNSE3_CH1", "NNSE3_CH2", "NNSE3_CH3"]    # Replace with actual trio-channel models
+
                 if test_parameters["model"] in target_models_single_channel:
                     test_datasets = target_models_single_channel
                 elif test_parameters["model"] in target_models_duo_channel:
@@ -718,6 +753,11 @@ def runModel(experiments, experiment_number):
                     raise ValueError(f"Unknown model: {test_parameters['model']}")
 
                 for dataset in test_datasets:
+                    # > Skip tests that already finished, so a crashed run can be restarted
+                    finished_marker = os.path.join(process.folder_construct(base_model=test_parameters["base_model"], model=test_parameters["model"], surveys=dataset, lr=test_parameters["lr"], base_reg=test_parameters["base_reg"], reg=test_parameters["reg"], wd=test_parameters["wd"], epoch_ceiling=test_parameters["epoch_ceiling"], save_dir=os.path.join(config["SAVE_DIR"], "Testing/")), "names_test.npy")
+                    if os.path.exists(finished_marker):
+                        print(f"Already tested, skipping: {os.path.dirname(finished_marker)}")
+                        continue
 
                     print_testing_parameters(experiment_number, test_parameters, dataset)
 
@@ -746,7 +786,7 @@ def runModel(experiments, experiment_number):
             
                     print(f"\n>>>>> Finished testing model {test_parameters['model']} trained on model {test_parameters['base_model']} on dataset {dataset} <<<<<\n" + "="*80)
 
-                print(f"\nFinished processing testing for {folder.name} ({test_counter}/{len(list(MODEL_PATH.iterdir()))})\n" + "="*80)
+                print(f"\nFinished processing testing for {folder.name} ({test_counter}/{len(test_folders)})\n" + "="*80)
             
         K.clear_session()
         gc.collect()
