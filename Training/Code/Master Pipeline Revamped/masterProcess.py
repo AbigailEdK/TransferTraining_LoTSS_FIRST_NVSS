@@ -145,40 +145,12 @@ def get_channels(surveys):
     - NFL: NVSS, FIRST and LOFAR
     - LNF: LOFAR, NVSS and FIRST
     - LFN: LOFAR, FIRST and NVSS
-    - FREP2: FIRST repeated across two channels
-    - FREP3: FIRST repeated across three channels
-    - FZER2_CH1: FIRST with zeros in channel 1
-    - FZER2_CH2: FIRST with zeros in channel 2
-    - FZER3_CH1: FIRST with zeros in channel 1 (three channels)
-    - FZER3_CH2: FIRST with zeros in channel 2 (three channels)
-    - FZER3_CH3: FIRST with zeros in channel 3 (three channels)
-    - FNSE2: FIRST with white noise in channel 1
-    - FNSE2_CH2: FIRST with white noise in channel 2
-    - FNSE3_CH1: FIRST with white noise in channel 1 (three channels)
-    - FNSE3_CH2: FIRST with white noise in channel 2 (three channels)
-    - FNSE3_CH3: FIRST with white noise in channel 3 (three channels)
-    - LREP2: LOFAR repeated across two channels
-    - LREP3: LOFAR repeated across three channels
-    - LZER2: LOFAR with zeros in channel 1
-    - LZER2_CH2: LOFAR with zeros in channel 2
-    - LZER3_CH1: LOFAR with zeros in channel 1 (three channels)
-    - LZER3_CH2: LOFAR with zeros in channel 2 (three channels)
-    - LZER3_CH3: LOFAR with zeros in channel 3 (three channels)
-    - LNSE2: LOFAR with white noise in channel 1
-    - LNSE2_CH2: LOFAR with white noise in channel 2
-    - LNSE3_CH1: LOFAR with white noise in channel 1 (three channels)
-    - LNSE3_CH2: LOFAR with white noise in channel 2 (three channels)
-    - LNSE3_CH3: LOFAR with white noise in channel 3 (three channels)
-    - NZER2: NVSS with zeros in channel 1
-    - NZER2_CH2: NVSS with zeros in channel 2
-    - NZER3_CH1: NVSS with zeros in channel 1 (three channels)
-    - NZER3_CH2: NVSS with zeros in channel 2 (three channels)
-    - NZER3_CH3: NVSS with zeros in channel 3 (three channels)
-    - NNSE2: NVSS with white noise in channel 1
-    - NNSE2_CH2: NVSS with white noise in channel 2
-    - NNSE3_CH1: NVSS with white noise in channel 1 (three channels)
-    - NNSE3_CH2: NVSS with white noise in channel 2 (three channels)
-    - NNSE3_CH3: NVSS with white noise in channel 3 (three channels)
+    ABLATION SELECTIONS (one survey only, the other channels filled): <S><FILL><N>[_CH<k>]
+    - S: F = FIRST, L = LOFAR, N = NVSS
+    - FILL: REP = the survey repeated in every channel, ZER = zeros (channel 3), NSE = white noise (channel 4)
+    - N: number of channels (2 or 3)
+    - _CH<k>: the channel (1-based) that holds the survey; the remaining channels hold the fill
+    e.g. FZER2_CH1 = [FIRST, zeros], LNSE2_CH2 = [noise, LOFAR], NZER3_CH3 = [zeros, zeros, NVSS]
     '''
 
     channel_map = {"FIRST": [0], "LoTSS": [1], "NVSS": [2], "ZEROS": [3], "WN": [4], 
@@ -223,15 +195,15 @@ def get_channels(surveys):
                    "LREP3": [1, 1, 1], 
 
                    # > Testing for LOFAR with zeros
-                   "LZER2_CH1": [3, 1], 
-                   "LZER2_CH2": [1, 3], 
+                   "LZER2_CH1": [1, 3], 
+                   "LZER2_CH2": [3, 1], 
                    "LZER3_CH1": [1, 3, 3], 
                    "LZER3_CH2": [3, 1, 3], 
                    "LZER3_CH3": [3, 3, 1], 
 
                    # > Testing for LOFAR with white noise
-                   "LNSE2_CH1": [4, 1], 
-                   "LNSE2_CH2": [1, 4], 
+                   "LNSE2_CH1": [1, 4], 
+                   "LNSE2_CH2": [4, 1], 
                    "LNSE3_CH1": [1, 4, 4], 
                    "LNSE3_CH2": [4, 1, 4], 
                    "LNSE3_CH3": [4, 4, 1], 
@@ -242,15 +214,15 @@ def get_channels(surveys):
                    "NREP3": [2, 2, 2], 
 
                    # > Testing for NVSS with zeros
-                   "NZER2_CH1": [3, 2], 
-                   "NZER2_CH2": [2, 3], 
+                   "NZER2_CH1": [2, 3], 
+                   "NZER2_CH2": [3, 2], 
                    "NZER3_CH1": [2, 3, 3], 
                    "NZER3_CH2": [3, 2, 3], 
                    "NZER3_CH3": [3, 3, 2], 
 
                    # > Testing for NVSS with white noise
-                   "NNSE2_CH1": [4, 2], 
-                   "NNSE2_CH2": [2, 4], 
+                   "NNSE2_CH1": [2, 4], 
+                   "NNSE2_CH2": [4, 2], 
                    "NNSE3_CH1": [2, 4, 4], 
                    "NNSE3_CH2": [4, 2, 4], 
                    "NNSE3_CH3": [4, 4, 2], 

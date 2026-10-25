@@ -738,10 +738,12 @@ def runModel(experiments, experiment_number, stage="FINAL", max_folds=None, run_
                 # ========================
                 # * PERFORM OTHER TESTING
                 # ========================
-                # > Test on every dataset with the same number of channels as the model
-                target_models_single_channel = ["FIRST", "LoTSS", "NVSS"]  # Replace with actual single-channel models
-                target_models_duo_channel = ["FN", "FL", "FREP2", "FZER2_CH1", "FZER2_CH2", "LF", "LN", "LREP2", "LZER2_CH1", "LZER2_CH2", "LNSE2_CH1", "LNSE2_CH2", "NF", "NL", "NREP2", "NZER2_CH1", "NZER2_CH2", "NNSE2_CH1", "NNSE2_CH2"]     # Replace with actual duo-channel models
-                target_models_trio_channel = ["FLN", "FNL", "NLF", "NFL", "LNF", "LFN", "FREP3", "FZER3_CH1", "FZER3_CH2", "FZER3_CH3", "FNSE3_CH1", "FNSE3_CH2", "FNSE3_CH3", "LREP3", "LZER3_CH1", "LZER3_CH2", "LZER3_CH3", "LNSE3_CH1", "LNSE3_CH2", "LNSE3_CH3", "NREP3", "NZER3_CH1", "NZER3_CH2", "NZER3_CH3", "NNSE3_CH1", "NNSE3_CH2", "NNSE3_CH3"]    # Replace with actual trio-channel models
+                # > Test on every input with the same number of channels as the model: the real survey combinations in every
+                # > channel order, plus the single-survey ablations (survey repeated, or one survey with zeros / white noise in
+                # > the other channels). See masterProcess.get_channels for the naming.
+                target_models_single_channel = ["FIRST", "LoTSS", "NVSS"]
+                target_models_duo_channel = ["FN", "FL", "LF", "LN", "NF", "NL"] + [f"{s}{fill}2{position}" for s in "FLN" for fill, position in [("REP", "")] + [(fill, f"_CH{k}") for fill in ["ZER", "NSE"] for k in (1, 2)]]
+                target_models_trio_channel = ["FLN", "FNL", "NLF", "NFL", "LNF", "LFN"] + [f"{s}{fill}3{position}" for s in "FLN" for fill, position in [("REP", "")] + [(fill, f"_CH{k}") for fill in ["ZER", "NSE"] for k in (1, 2, 3)]]
 
                 if test_parameters["model"] in target_models_single_channel:
                     test_datasets = target_models_single_channel
