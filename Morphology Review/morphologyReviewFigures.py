@@ -1,12 +1,17 @@
-"""Publication figures comparing the sources marked Yes and No in the morphology review.
+"""Publication figures comparing the sources marked Yes and No in the morphology reviews.
 
-Reads Results/MorphologyReviewStats/source_features.csv (made by morphologyReviewStats.py, which is
-run first if the file is missing) and writes vector PDF and 300 dpi PNG figures, plus a LaTeX table,
-to Results/MorphologyReviewStats/PaperFigures/:
+One set of figures is made per survey comparison (reviewComparisons.py: FIRST vs LoTSS, FIRST vs NVSS);
+by default every comparison with saved answers, or the ones named on the command line, e.g.
+	python morphologyReviewFigures.py FIRST_vs_NVSS
+Below, "A" and "B" are the two compared surveys (FIRST and LoTSS, or FIRST and NVSS).
 
-	fig1_example_cutouts      representative Yes / No sources (FIRST above LoTSS, 3-sigma contours)
+Reads MorphologyReviewStats/<comparison>/source_features.csv (made by morphologyReviewStats.py, which is
+run first if the file is missing) and writes vector PDF and 300 dpi PNG figures, plus a LaTeX table
+whose caption names the comparison, to MorphologyReviewStats/<comparison>/PaperFigures/:
+
+	fig1_example_cutouts      representative Yes / No sources (A above B, 3-sigma contours)
 	fig2_distributions        the six measurements that best explain the difference
-	fig3_snr_plane            FIRST vs LoTSS peak S/N for every source
+	fig3_snr_plane            A vs B peak S/N for every source
 	fig4_catalogue_breakdown  share marked No per source catalogue and per label
 	fig5_effect_sizes         Cliff's delta with bootstrap 95% intervals for every key measurement
 	table_key_measurements.tex
@@ -16,7 +21,7 @@ and colour maps match paperModelEvaluation.py: Yes / No use its selected / basel
 Yes and No also differ in line style and marker, so the figures still read in greyscale.
 """
 
-from pathlib import Path
+import sys
 
 import matplotlib
 
@@ -29,9 +34,9 @@ from matplotlib.lines import Line2D
 from scipy.stats import mannwhitneyu, sigmaclip
 
 import morphologyReviewStats as stats
+from reviewComparisons import selected_comparisons
 
-FEATURES_CSV = stats.OUTPUT_DIR / "source_features.csv"
-FIGURE_DIR = stats.OUTPUT_DIR / "PaperFigures"
+FIGURE_DIR = None  # set per comparison by run(); morphologyAnalyticalClassification.py points it elsewhere
 
 SINGLE_COLUMN = 3.35  # inches
 FULL_WIDTH = 7.0
@@ -45,27 +50,41 @@ MARKERS = {"Yes": "o", "No": "^"}
 GRID = "#dedede"
 MUTED = "grey"
 
-# column -> (axis label, multiplier to convert units); the order is the order in fig 5 and the table
-KEY_MEASUREMENTS = {
-	"FIRST_peak_snr": ("FIRST peak S/N", 1),
-	"FIRST_noise": (r"FIRST noise ($\sigma$ / peak)", 1),
-	"FIRST_n_pix_3sigma": (r"FIRST pixels $>3\sigma$", 1),
-	"FIRST_largest_island_extent_px": ("FIRST largest component extent (arcsec)", PIXEL_ARCSEC),
-	"FIRST_centroid_offset_px": ("FIRST emission offset from centre (arcsec)", PIXEL_ARCSEC),
-	"LoTSS_peak_snr": ("LoTSS peak S/N", 1),
-	"LoTSS_noise": (r"LoTSS noise ($\sigma$ / peak)", 1),
-	"LoTSS_n_pix_3sigma": (r"LoTSS pixels $>3\sigma$", 1),
-	"LoTSS_largest_island_extent_px": ("LoTSS largest component extent (arcsec)", PIXEL_ARCSEC),
-	"LoTSS_centroid_offset_px": ("LoTSS emission offset from centre (arcsec)", PIXEL_ARCSEC),
-	"NVSS_peak_snr": ("NVSS peak S/N", 1),
-	"NVSS_n_pix_3sigma": (r"NVSS pixels $>3\sigma$", 1),
-	"FIRST_vs_LoTSS_pearson_r": ("FIRST-LoTSS pixel correlation $r$", 1),
-	"FIRST_vs_LoTSS_mask_iou": (r"FIRST-LoTSS $3\sigma$ mask overlap (IoU)", 1),
-	"FIRST_vs_LoTSS_log_size_ratio": (r"$\log_{10}$ FIRST/LoTSS emission size", 1),
-}
-GROUPS = (
-	("FIRST", "FIRST_"), ("LoTSS", "LoTSS_"), ("NVSS", "NVSS_"), ("FIRST vs LoTSS", "FIRST_vs_LoTSS_"),
-)
+def key_measurements(comparison):
+	"""column -> (axis label, multiplier to convert units); the order is the order in fig 5 and the table.
+
+	Five measurements for each compared survey, peak S/N and size for the survey left out of the
+	comparison (for context), then the agreement between the two compared surveys.
+	"""
+	measurements = {}
+	for survey in comparison.surveys:
+		measurements.update({
+			f"{survey}_peak_snr": (f"{survey} peak S/N", 1),
+			f"{survey}_noise": (rf"{survey} noise ($\sigma$ / peak)", 1),
+			f"{survey}_n_pix_3sigma": (rf"{survey} pixels $>3\sigma$", 1),
+			f"{survey}_largest_island_extent_px": (f"{survey} largest component extent (arcsec)", PIXEL_ARCSEC),
+			f"{survey}_centroid_offset_px": (f"{survey} emission offset from centre (arcsec)", PIXEL_ARCSEC),
+		})
+	for survey in comparison.other_surveys:
+		measurements.update({
+			f"{survey}_peak_snr": (f"{survey} peak S/N", 1),
+			f"{survey}_n_pix_3sigma": (rf"{survey} pixels $>3\sigma$", 1),
+		})
+	first, second = comparison.surveys
+	measurements.update({
+		f"{comparison.name}_pearson_r": (f"{first}-{second} pixel correlation $r$", 1),
+		f"{comparison.name}_mask_iou": (rf"{first}-{second} $3\sigma$ mask overlap (IoU)", 1),
+		f"{comparison.name}_log_size_ratio": (rf"$\log_{{10}}$ {first}/{second} emission size", 1),
+	})
+	return measurements
+
+
+def measurement_groups(comparison):
+	"""(group name, column prefix) in the order the groups appear in fig 5."""
+	return (
+		*((survey, f"{survey}_") for survey in comparison.surveys + comparison.other_surveys),
+		(comparison.label, f"{comparison.name}_"),
+	)
 
 
 def set_style():
@@ -129,11 +148,11 @@ def group_values(table, column, scale=1):
 
 # ---------- figure 1: example cutouts ----------
 
-def pick_examples(table, per_group=3):
-	"""Sources nearest the 25th / 50th / 75th percentile of FIRST peak S/N within each group."""
+def pick_examples(table, survey, per_group=3):
+	"""Sources nearest the 25th / 50th / 75th percentile of the survey's peak S/N within each group."""
 	chosen = {}
 	for decision in ("Yes", "No"):
-		subset = table.loc[table["decision"] == decision, "FIRST_peak_snr"].dropna()
+		subset = table.loc[table["decision"] == decision, f"{survey}_peak_snr"].dropna()
 		targets = np.percentile(subset, np.linspace(25, 75, per_group))
 		ids = []
 		for target in targets:
@@ -154,13 +173,13 @@ def draw_cutout(axis, data):
 	return (data.max() - background) / noise if noise > 0 else np.nan
 
 
-def figure_examples(table, group_prefix="Marked"):
-	examples = pick_examples(table)
+def figure_examples(table, comparison, group_prefix="Marked"):
+	examples = pick_examples(table, comparison.surveys[0])
 	columns = [(d, i) for d in ("Yes", "No") for i in examples[d]]
 	fig, axes = plt.subplots(2, len(columns), figsize=(FULL_WIDTH, FULL_WIDTH / len(columns) * 2 + 0.45),
 		gridspec_kw={"wspace": 0.04, "hspace": 0.04})
 	for column, (decision, source_id) in enumerate(columns):
-		for row, survey in enumerate(("FIRST", "LoTSS")):
+		for row, survey in enumerate(comparison.surveys):
 			axis = axes[row, column]
 			data = stats.load_image(survey, int(source_id))
 			if data is None:
@@ -216,18 +235,20 @@ def histogram_panel(axis, table, column, label, scale=1, log=False):
 	axis.set_ylim(0, axis.get_ylim()[1] * 1.12)  # headroom for the delta label
 
 
-def figure_distributions(table):
+def figure_distributions(table, comparison):
+	first, second = comparison.surveys
 	panels = (
-		("FIRST_peak_snr", True),
-		("LoTSS_peak_snr", True),
-		("FIRST_vs_LoTSS_pearson_r", False),
-		("FIRST_vs_LoTSS_mask_iou", False),
-		("FIRST_largest_island_extent_px", False),
-		("FIRST_centroid_offset_px", False),
+		(f"{first}_peak_snr", True),
+		(f"{second}_peak_snr", True),
+		(f"{comparison.name}_pearson_r", False),
+		(f"{comparison.name}_mask_iou", False),
+		(f"{first}_largest_island_extent_px", False),
+		(f"{first}_centroid_offset_px", False),
 	)
+	measurements = key_measurements(comparison)
 	fig, axes = plt.subplots(3, 2, figsize=(FULL_WIDTH, 7.5))
 	for axis, letter, (column, log) in zip(axes.flat, "abcdef", panels):
-		label, scale = KEY_MEASUREMENTS[column]
+		label, scale = measurements[column]
 		histogram_panel(axis, table, column, label, scale, log)
 		panel_label(axis, letter)
 	for axis in axes[:, 0]:
@@ -241,18 +262,19 @@ def figure_distributions(table):
 
 # ---------- figure 3: S/N plane ----------
 
-def figure_snr_plane(table):
+def figure_snr_plane(table, comparison):
+	first, second = comparison.surveys
 	fig, axis = plt.subplots(figsize=(SINGLE_COLUMN, SINGLE_COLUMN))
 	for decision, size, alpha in (("Yes", 5, 0.45), ("No", 9, 0.8)):
 		subset = table[table["decision"] == decision]
-		axis.scatter(subset["FIRST_peak_snr"], subset["LoTSS_peak_snr"], s=size, alpha=alpha,
+		axis.scatter(subset[f"{first}_peak_snr"], subset[f"{second}_peak_snr"], s=size, alpha=alpha,
 			marker=MARKERS[decision], color=COLOURS[decision], linewidths=0, rasterized=True)
 	axis.set_xscale("log")
 	axis.set_yscale("log")
 	axis.axvline(5, color="black", linestyle="--", linewidth=0.7)
 	axis.text(5.3, axis.get_ylim()[1] * 0.75, r"$5\sigma$", va="top")
-	axis.set_xlabel("FIRST peak S/N")
-	axis.set_ylabel("LoTSS peak S/N")
+	axis.set_xlabel(f"{first} peak S/N")
+	axis.set_ylabel(f"{second} peak S/N")
 	axis.legend(handles=decision_legend(table, lines=False), loc="lower right")
 	save(fig, "fig3_snr_plane")
 
@@ -294,11 +316,11 @@ def figure_catalogues(table):
 
 # ---------- figure 5 + table: effect sizes ----------
 
-def effect_size_table(table):
+def effect_size_table(table, comparison):
 	rng = np.random.default_rng(0)
-	comparison = stats.compare_numeric(table).set_index("feature")
+	numeric = stats.compare_numeric(table).set_index("feature")
 	rows = []
-	for column, (label, scale) in KEY_MEASUREMENTS.items():
+	for column, (label, scale) in key_measurements(comparison).items():
 		groups = group_values(table, column, scale)
 		low, high = bootstrap_delta(groups["No"], groups["Yes"], rng)
 		rows.append({
@@ -306,21 +328,22 @@ def effect_size_table(table):
 			"median_yes": np.median(groups["Yes"]), "median_no": np.median(groups["No"]),
 			"q1_yes": np.percentile(groups["Yes"], 25), "q3_yes": np.percentile(groups["Yes"], 75),
 			"q1_no": np.percentile(groups["No"], 25), "q3_no": np.percentile(groups["No"], 75),
-			"delta": comparison.at[column, "cliffs_delta_no_vs_yes"], "delta_low": low, "delta_high": high,
-			"auc": comparison.at[column, "auc_single_feature"],
-			"p_fdr": comparison.at[column, "mannwhitney_p_fdr"],
+			"delta": numeric.at[column, "cliffs_delta_no_vs_yes"], "delta_low": low, "delta_high": high,
+			"auc": numeric.at[column, "auc_single_feature"],
+			"p_fdr": numeric.at[column, "mannwhitney_p_fdr"],
 		})
 	return pd.DataFrame(rows)
 
 
-def survey_group(feature):
+def survey_group(feature, groups):
 	# longest prefix wins so FIRST_vs_LoTSS_* is not filed under FIRST
-	return max((g for g in GROUPS if feature.startswith(g[1])), key=lambda g: len(g[1]))[0]
+	return max((g for g in groups if feature.startswith(g[1])), key=lambda g: len(g[1]))[0]
 
 
-def figure_effect_sizes(effects):
+def figure_effect_sizes(effects, comparison):
+	groups = measurement_groups(comparison)
 	effects = effects.copy()
-	effects["group"] = effects["feature"].map(survey_group)
+	effects["group"] = effects["feature"].map(lambda feature: survey_group(feature, groups))
 	fig, axis = plt.subplots(figsize=(SINGLE_COLUMN, 0.2 * len(effects) + 1.1))
 	# shaded band = negligible effect (|delta| < 0.147); the large-effect boundary (0.474) is dotted
 	axis.axvspan(-0.147, 0.147, color=GRID, alpha=0.6, linewidth=0, zorder=0)
@@ -337,7 +360,7 @@ def figure_effect_sizes(effects):
 				axis.axhline(y - 0.8, color=GRID, linewidth=0.6)
 			previous_group = row["group"]
 		positions.append(y)
-		labels.append(row["label"].replace(f"{row['group']} ", "") if row["group"] != "FIRST vs LoTSS" else row["label"])
+		labels.append(row["label"].replace(f"{row['group']} ", "") if row["group"] != comparison.label else row["label"])
 		colour = COLOURS["No"] if row["delta"] > 0 else COLOURS["Yes"]
 		axis.errorbar(row["delta"], y, xerr=[[row["delta"] - row["delta_low"]], [row["delta_high"] - row["delta"]]],
 			fmt="o", markersize=3.5, color=colour, elinewidth=0.9, capsize=1.5)
@@ -349,7 +372,7 @@ def figure_effect_sizes(effects):
 	axis.set_xlim(-1.05, 1.05)
 	axis.set_xlabel(r"Cliff's $\delta$ (No vs Yes)")
 	# group names in the left margin, beside their first row
-	for group, _ in GROUPS:
+	for group, _ in groups:
 		rows = [p for p, g in zip(positions, effects["group"]) if g == group]
 		if rows:
 			axis.text(-1.02, rows[0] - 0.55, group, fontsize="small", fontweight="bold", va="bottom")
@@ -377,12 +400,15 @@ def format_p(p):
 	return f"{p:.3f}"
 
 
-def write_latex_table(effects, table, how_labelled="were judged to show the same morphology", label="tab:morphology_review"):
+def write_latex_table(effects, table, comparison, how_labelled="were judged to show the same morphology", label=None):
 	n_yes, n_no = (table["decision"] == "Yes").sum(), (table["decision"] == "No").sum()
+	first, second = comparison.surveys
+	label = label or f"tab:morphology_review_{comparison.name}"
 	lines = [
+		rf"% {comparison.label} morphology review",
 		r"\begin{table*}",
 		r"\centering",
-		rf"\caption{{Image measurements for sources whose FIRST and LoTSS images {how_labelled} "
+		rf"\caption{{{comparison.label}: image measurements for sources whose {first} and {second} images {how_labelled} "
 		rf"(Yes, $n={n_yes}$) and those that did not (No, $n={n_no}$). Values are medians with the "
 		r"interquartile range in brackets. Noise is the standard deviation of the $3\sigma$-clipped image as a "
 		r"fraction of the image peak. $\delta$ is Cliff's delta (positive when No values are larger) with a "
@@ -405,29 +431,46 @@ def write_latex_table(effects, table, how_labelled="were judged to show the same
 	print("  table_key_measurements.tex")
 
 
-def main():
-	if not FEATURES_CSV.exists():
-		print("source_features.csv not found, running morphologyReviewStats.py first ...")
-		stats.main()
-	FIGURE_DIR.mkdir(parents=True, exist_ok=True)
-	table = pd.read_csv(FEATURES_CSV, index_col=0)
-	set_style()
-	print(f"Writing figures to {FIGURE_DIR}")
-	figure_examples(table)
-	figure_distributions(table)
-	figure_snr_plane(table)
-	figure_catalogues(table)
-	effects = effect_size_table(table)
-	figure_effect_sizes(effects)
-	write_latex_table(effects, table)
+def load_features(comparison):
+	"""The comparison's source_features.csv, running morphologyReviewStats.py first if it is missing."""
+	path = comparison.output_dir / "source_features.csv"
+	if not path.exists():
+		print(f"[{comparison.label}] source_features.csv not found, running morphologyReviewStats.py first ...")
+		stats.run(comparison)
+	table = pd.read_csv(path, index_col=0)
+	table.index.name = "id"
+	return table
 
+
+def run(comparison):
+	global FIGURE_DIR
+	FIGURE_DIR = comparison.output_dir / "PaperFigures"
+	table = load_features(comparison)
+	FIGURE_DIR.mkdir(parents=True, exist_ok=True)
+	set_style()
+	print(f"[{comparison.label}] writing figures to {FIGURE_DIR}")
+	figure_examples(table, comparison)
+	figure_distributions(table, comparison)
+	figure_snr_plane(table, comparison)
+	figure_catalogues(table)
+	effects = effect_size_table(table, comparison)
+	figure_effect_sizes(effects, comparison)
+	write_latex_table(effects, table, comparison)
+
+	first = comparison.surveys[0]
 	no = table[table["decision"] == "No"]
 	yes = table[table["decision"] == "Yes"]
-	print("\nNumbers for the caption / text:")
-	print(f"  No sources with FIRST peak S/N < 5: {(no['FIRST_peak_snr'] < 5).mean():.1%}"
-		f"   (Yes: {(yes['FIRST_peak_snr'] < 5).mean():.1%})")
-	print(f"  No sources from LoMorph: {(no['Catalog'] == 'LoMorph').sum()} of {len(no)}")
+	print(f"\n[{comparison.label}] numbers for the caption / text:")
+	print(f"  No sources with {first} peak S/N < 5: {(no[f'{first}_peak_snr'] < 5).mean():.1%}"
+		f"   (Yes: {(yes[f'{first}_peak_snr'] < 5).mean():.1%})")
+	print(f"  No sources from LoMorph: {(no['Catalog'] == 'LoMorph').sum()} of {len(no)}\n")
+
+
+def main(names=()):
+	for comparison in selected_comparisons(names):
+		if stats.enough_answers(comparison):
+			run(comparison)
 
 
 if __name__ == "__main__":
-	main()
+	main(sys.argv[1:])

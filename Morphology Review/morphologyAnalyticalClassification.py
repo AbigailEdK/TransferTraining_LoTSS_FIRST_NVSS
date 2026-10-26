@@ -1,8 +1,14 @@
 """Replace the visual Yes / No morphology decisions with an explicit, reproducible threshold rule.
 
-The manual review (morphologyReview.py) is used only to calibrate the rule. Every source is
-then re-labelled purely from its FIRST and LoTSS image measurements (morphologyReviewStats.py),
-with no catalogue information, and all statistics and paper figures are recalculated with the new labels.
+A separate rule is fitted for each survey comparison (reviewComparisons.py: FIRST vs LoTSS from
+morphologyReview.py, FIRST vs NVSS from morphologyReviewNVSS.py); by default every comparison with
+saved answers, or the ones named on the command line, e.g.
+	python morphologyAnalyticalClassification.py FIRST_vs_NVSS
+Below, "A" and "B" are the two compared surveys.
+
+The manual review is used only to calibrate the rule. Every source is then re-labelled purely
+from its A and B image measurements (morphologyReviewStats.py), with no catalogue information,
+and all statistics and paper figures are recalculated with the new labels.
 
 The rule
 --------
@@ -10,10 +16,11 @@ A source is Yes when every measurement in the rule passes its threshold, e.g.
 
 	Yes  if  FIRST peak S/N >= a  AND  FIRST-LoTSS 3-sigma mask overlap >= b
 
-Candidate measurements (CANDIDATE_FEATURES) are the image quantities that separated the manual
+Candidate measurements (candidate_features) are the image quantities that separated the manual
 groups. The per-image mean / median / noise columns are left out because the images are
-min-max scaled, which makes them restatements of the peak S/N. NVSS is left out because the
-review compared FIRST with LoTSS.
+min-max scaled, which makes them restatements of the peak S/N. The survey that is not part of
+the comparison (NVSS for FIRST vs LoTSS, LoTSS for FIRST vs NVSS) is left out, because the review
+only compared A with B.
 
 Every rule with one or two candidate measurements is tried, with thresholds at the percentiles
 of each measurement. Rules are scored by balanced accuracy against the manual labels (the
@@ -22,7 +29,7 @@ The form of the rule (which measurements) is chosen by 5-fold stratified cross-v
 A one-measurement rule is preferred unless a pair improves the cross-validated score by more
 than SIMPLER_RULE_TOLERANCE. Its thresholds are then refitted on all sources.
 
-Outputs, in Results/MorphologyReviewStats/Analytical/:
+Outputs, in MorphologyReviewStats/<comparison>/Analytical/ (summary.txt names the comparison):
 	analytical_labels.csv      every source: manual and analytical label, agreement, rule measurements
 	disagreements.csv          sources where the rule and the manual label differ, worth re-inspecting
 	numeric_comparison.csv     Yes vs No statistics for every image measurement, using the analytical labels
@@ -37,6 +44,7 @@ analytical groups perfectly by construction (|delta| = 1 for those rows); the ot
 show how the two groups differ beyond the rule itself.
 """
 
+import sys
 from itertools import combinations
 
 import matplotlib
@@ -49,20 +57,25 @@ import pandas as pd
 
 import morphologyReviewFigures as figures
 import morphologyReviewStats as stats
+from reviewComparisons import selected_comparisons
 
-OUTPUT_DIR = stats.OUTPUT_DIR / "Analytical"
 
-# column -> label used in the rule text and plots
-CANDIDATE_FEATURES = {
-	"FIRST_peak_snr": "FIRST peak S/N",
-	"LoTSS_peak_snr": "LoTSS peak S/N",
-	"FIRST_n_pix_5sigma": r"FIRST pixels $>5\sigma$",
-	"FIRST_largest_island_extent_px": "FIRST largest component extent (px)",
-	"FIRST_centroid_offset_px": "FIRST emission offset from centre (px)",
-	"FIRST_vs_LoTSS_pearson_r": "FIRST-LoTSS pixel correlation r",
-	"FIRST_vs_LoTSS_mask_iou": r"FIRST-LoTSS $3\sigma$ mask overlap (IoU)",
-	"FIRST_vs_LoTSS_log_size_ratio": r"$\log_{10}$ FIRST/LoTSS emission size",
-}
+def candidate_features(comparison):
+	"""column -> label used in the rule text and plots."""
+	first, second = comparison.surveys
+	pair = comparison.name
+	return {
+		f"{first}_peak_snr": f"{first} peak S/N",
+		f"{second}_peak_snr": f"{second} peak S/N",
+		f"{first}_n_pix_5sigma": rf"{first} pixels $>5\sigma$",
+		f"{first}_largest_island_extent_px": f"{first} largest component extent (px)",
+		f"{first}_centroid_offset_px": f"{first} emission offset from centre (px)",
+		f"{pair}_pearson_r": f"{first}-{second} pixel correlation r",
+		f"{pair}_mask_iou": rf"{first}-{second} $3\sigma$ mask overlap (IoU)",
+		f"{pair}_log_size_ratio": rf"$\log_{{10}}$ {first}/{second} emission size",
+	}
+
+
 MAX_FEATURES = 2
 THRESHOLD_PERCENTILES = np.linspace(1, 99, 99)
 CV_FOLDS = 5
@@ -135,9 +148,9 @@ def stratified_folds(is_yes, k, rng):
 	return fold
 
 
-def select_rule(table, is_yes):
+def select_rule(table, is_yes, candidates):
 	"""Cross-validate every one- and two-measurement rule form; return the chosen form and all scores."""
-	features = [f for f in CANDIDATE_FEATURES if f in table]
+	features = [f for f in candidates if f in table]
 	forms = [combo for n in range(1, MAX_FEATURES + 1) for combo in combinations(features, n)]
 	fold = stratified_folds(is_yes, CV_FOLDS, np.random.default_rng(RANDOM_SEED))
 
@@ -183,10 +196,12 @@ def agreement_summary(manual_yes, analytical_yes):
 	}
 
 
-def rule_text(rule, latex=False):
+def rule_text(rule, labels=None):
+	"""Plain column names, or the LaTeX labels in `labels` when given."""
+	latex = labels is not None
 	parts = []
 	for feature, direction, threshold in rule:
-		name = CANDIDATE_FEATURES[feature] if latex else feature
+		name = labels[feature] if latex else feature
 		symbol = {">=": r"$\geq$", "<=": r"$\leq$"}[direction] if latex else direction
 		parts.append(f"{name} {symbol} {threshold:.3g}")
 	return " AND ".join(parts)
@@ -199,7 +214,7 @@ def is_log_feature(values):
 	return values.min() > 0 and np.percentile(values, 99) / np.percentile(values, 1) > 100
 
 
-def figure_rule_plane(table, rule, manual_yes):
+def figure_rule_plane(table, rule, manual_yes, labels, output_dir):
 	"""The rule drawn over every source; colour = manual label, so disagreements are visible."""
 	fig, axis = plt.subplots(figsize=(figures.SINGLE_COLUMN, figures.SINGLE_COLUMN))
 	manual = np.where(manual_yes, "Yes", "No")
@@ -226,7 +241,7 @@ def figure_rule_plane(table, rule, manual_yes):
 			axis.set_xscale("symlog", linthresh=1)
 		axis.axvline(threshold, color="black", linestyle="--", linewidth=0.8)
 		axis.text(threshold, axis.get_ylim()[1], f" {threshold:.3g}", ha="left", va="top", fontsize="small")
-		axis.set_xlabel(CANDIDATE_FEATURES[feature])
+		axis.set_xlabel(labels[feature])
 		axis.set_ylabel("Fraction of manual group")
 		handles = figures.decision_legend(table.assign(decision=manual))
 	else:
@@ -251,16 +266,16 @@ def figure_rule_plane(table, rule, manual_yes):
 		axis.set_ylim(y_limits)
 		axis.text(np.sqrt(x_span[0] * x_span[1]) if axis.get_xscale() == "log" else np.mean(x_span),
 			y_span[1], "Analytical Yes", ha="center", va="top", fontsize="small", color=figures.MUTED)
-		axis.set_xlabel(CANDIDATE_FEATURES[fx])
-		axis.set_ylabel(CANDIDATE_FEATURES[fy])
+		axis.set_xlabel(labels[fx])
+		axis.set_ylabel(labels[fy])
 		handles = figures.decision_legend(table.assign(decision=manual), lines=False)
 	for handle in handles:
 		handle.set_label("Manual " + handle.get_label())
 	axis.legend(handles=handles, loc="center right")
-	save(fig, "rule_plane")
+	save(fig, "rule_plane", output_dir)
 
 
-def figure_confusion(matrix):
+def figure_confusion(matrix, output_dir):
 	"""Row-normalised, drawn like the confusion matrices in paperModelEvaluation.py."""
 	fig, axis = plt.subplots(figsize=(figures.SINGLE_COLUMN, figures.SINGLE_COLUMN * 0.85))
 	share = matrix.div(matrix.sum(axis=1), axis=0).to_numpy()
@@ -272,49 +287,49 @@ def figure_confusion(matrix):
 	axis.set_yticks([0, 1], ["Yes", "No"])
 	axis.set_xlabel("Analytical label")
 	axis.set_ylabel("Manual label")
-	save(fig, "confusion_matrix")
+	save(fig, "confusion_matrix", output_dir)
 
 
-def save(fig, name):
+def save(fig, name, output_dir):
 	for extension, dpi in (("pdf", None), ("png", 300)):
-		fig.savefig(OUTPUT_DIR / f"{name}.{extension}", dpi=dpi)
+		fig.savefig(output_dir / f"{name}.{extension}", dpi=dpi)
 	plt.close(fig)
 	print(f"  {name}")
 
 
 # ---------- main ----------
 
-def main():
-	if not figures.FEATURES_CSV.exists():
-		print("source_features.csv not found, running morphologyReviewStats.py first ...")
-		stats.main()
-	OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-	table = pd.read_csv(figures.FEATURES_CSV, index_col=0)
-	table.index.name = "id"
+def run(comparison):
+	output_dir = comparison.output_dir / "Analytical"
+	table = figures.load_features(comparison)
+	output_dir.mkdir(parents=True, exist_ok=True)
+	candidates = candidate_features(comparison)
 	manual_yes = (table["decision"] == "Yes").to_numpy()
 
-	print(f"Searching one- and two-measurement rules with {CV_FOLDS}-fold cross-validation ...")
-	chosen, cv_results = select_rule(table, manual_yes)
+	print(f"[{comparison.label}] searching one- and two-measurement rules with {CV_FOLDS}-fold cross-validation ...")
+	chosen, cv_results = select_rule(table, manual_yes, candidates)
 	rule, training_score = fit_rule(table, list(chosen["features"]), manual_yes)
 	analytical_yes = apply_rule(table, rule)
 	matrix, agreement = agreement_summary(manual_yes, analytical_yes)
 	cv_results.assign(features=cv_results["features"].map(" AND ".join)).to_csv(
-		OUTPUT_DIR / "rule_search_cv.csv", index=False)
+		output_dir / "rule_search_cv.csv", index=False)
 
 	# labels for every source
 	labels = table[["decision"] + [f for f, _, _ in rule]].rename(columns={"decision": "manual"})
 	labels.insert(1, "analytical", np.where(analytical_yes, "Yes", "No"))
 	labels.insert(2, "agrees", labels["manual"] == labels["analytical"])
-	labels.to_csv(OUTPUT_DIR / "analytical_labels.csv")
-	labels[~labels["agrees"]].to_csv(OUTPUT_DIR / "disagreements.csv")
+	labels.to_csv(output_dir / "analytical_labels.csv")
+	labels[~labels["agrees"]].to_csv(output_dir / "disagreements.csv")
 
 	# from here on, "decision" is the analytical label, so every statistic and figure uses it
 	analytical = table.assign(decision=labels["analytical"])
-	comparison = stats.compare_numeric(analytical)
-	comparison.to_csv(OUTPUT_DIR / "numeric_comparison.csv", index=False)
+	numeric = stats.compare_numeric(analytical)
+	numeric.to_csv(output_dir / "numeric_comparison.csv", index=False)
 
 	n_yes, n_no = analytical_yes.sum(), (~analytical_yes).sum()
 	lines = [
+		f"COMPARISON: {comparison.label}  (rule calibrated on {comparison.progress_file.name})",
+		"",
 		"ANALYTICAL RULE (image measurements only, no catalogue information)",
 		f"  Yes  if  {rule_text(rule)}",
 		f"  chosen by {CV_FOLDS}-fold cross-validated balanced accuracy: "
@@ -338,7 +353,7 @@ def main():
 		"  Measurements used by the rule separate the groups perfectly by construction.",
 		f"{'feature':<44}{'median Yes':>12}{'median No':>12}{'delta':>8}{'AUC':>6}{'p (FDR)':>10}",
 	]
-	for _, row in comparison.iterrows():
+	for _, row in numeric.iterrows():
 		lines.append(
 			f"  {row['feature']:<42}{row['median_yes']:>12.4g}{row['median_no']:>12.4g}"
 			f"{row['cliffs_delta_no_vs_yes']:>+8.2f}{row['auc_single_feature']:>6.2f}{row['mannwhitney_p_fdr']:>10.1e}"
@@ -347,32 +362,40 @@ def main():
 	lines.append("\nPOST-HOC BREAKDOWN (catalogue information was not used by the rule)")
 	for column in ("Catalog", "Type"):
 		counts, p, _ = stats.compare_categorical(analytical, column)
-		counts.to_csv(OUTPUT_DIR / f"categorical_{column}.csv")
+		counts.to_csv(output_dir / f"categorical_{column}.csv")
 		lines.append(f"\n  {column}: chi-squared p = {p:.2e}")
 		for name, row in counts.iterrows():
 			lines.append(f"    {str(name):<14} {int(row['No']):>4} / {int(row['total']):<5} No  ({row['no_rate']:.1%})")
 
 	report = "\n".join(lines)
 	print(report)
-	(OUTPUT_DIR / "summary.txt").write_text(report, encoding="utf-8")
+	(output_dir / "summary.txt").write_text(report, encoding="utf-8")
 
-	print(f"\nWriting figures to {OUTPUT_DIR}")
+	print(f"\n[{comparison.label}] writing figures to {output_dir}")
 	figures.set_style()
-	figure_rule_plane(table, rule, manual_yes)
-	figure_confusion(matrix)
+	figure_rule_plane(table, rule, manual_yes, candidates, output_dir)
+	figure_confusion(matrix, output_dir)
 
-	figures.FIGURE_DIR = OUTPUT_DIR / "PaperFigures"
+	figures.FIGURE_DIR = output_dir / "PaperFigures"
 	figures.FIGURE_DIR.mkdir(exist_ok=True)
-	figures.figure_examples(analytical, group_prefix="Analytical")
-	figures.figure_distributions(analytical)
-	figures.figure_snr_plane(analytical)
+	figures.figure_examples(analytical, comparison, group_prefix="Analytical")
+	figures.figure_distributions(analytical, comparison)
+	figures.figure_snr_plane(analytical, comparison)
 	figures.figure_catalogues(analytical)
-	effects = figures.effect_size_table(analytical)
-	figures.figure_effect_sizes(effects)
-	figures.write_latex_table(effects, analytical,
-		how_labelled=f"satisfy the analytical criterion ({rule_text(rule, latex=True)})",
-		label="tab:morphology_analytical")
+	effects = figures.effect_size_table(analytical, comparison)
+	figures.figure_effect_sizes(effects, comparison)
+	figures.write_latex_table(effects, analytical, comparison,
+		how_labelled=f"satisfy the analytical criterion ({rule_text(rule, candidates)})",
+		label=f"tab:morphology_analytical_{comparison.name}")
+	print()
+
+
+def main(names=()):
+	for comparison in selected_comparisons(names):
+		# every cross-validation fold needs at least one source of each label
+		if stats.enough_answers(comparison, minimum=CV_FOLDS):
+			run(comparison)
 
 
 if __name__ == "__main__":
-	main()
+	main(sys.argv[1:])

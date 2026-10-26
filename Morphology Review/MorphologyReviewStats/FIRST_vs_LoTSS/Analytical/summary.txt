@@ -1,3 +1,5 @@
+COMPARISON: FIRST vs LoTSS  (rule calibrated on morphology_review_progress.json)
+
 ANALYTICAL RULE (image measurements only, no catalogue information)
   Yes  if  FIRST_n_pix_5sigma >= 11
   chosen by 5-fold cross-validated balanced accuracy: 0.949 +/- 0.014

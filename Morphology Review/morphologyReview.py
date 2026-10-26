@@ -6,6 +6,9 @@ Answer Yes / No / Skip; progress is saved after every answer and when the
 window is closed, so running the script again continues where you left off.
 
 Keys: Left / Right = back / forward, Y = Yes, N = No, S = Skip.
+
+The same program reviews other survey pairs (see reviewComparisons.py); morphologyReviewNVSS.py
+runs it for FIRST and NVSS, which keeps its own progress and results files.
 """
 
 import json
@@ -24,14 +27,8 @@ from astropy.io import fits
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
-ROOT = Path(__file__).resolve().parent
-FITS_DIR = ROOT / "Data" / "RADCAT_F"
-CHANNEL_DIR = ROOT / "Data" / "FITS_BY_CHANNEL"
-CATALOGUE = ROOT / "Data" / "RADCAT.csv"
-PROGRESS_FILE = ROOT / "morphology_review_progress.json"
-RESULTS_CSV = ROOT / "morphology_review_results.csv"
+from reviewComparisons import CATALOGUE, CHANNEL_DIR, COMPARISONS, FITS_DIR
 
-SURVEYS = ("FIRST", "LoTSS")
 # decision code -> text shown to the user / written to the results CSV
 DECISION_NAMES = {"yes": "Yes", "no": "No", "skip": "Skipped"}
 PILES = {"Remaining": None, "Yes": "yes", "No": "no", "Skipped": "skip"}
@@ -66,11 +63,12 @@ def load_image(survey, source_id):
 
 
 class ReviewApp:
-	def __init__(self, window, catalogue, progress_file=PROGRESS_FILE, results_file=RESULTS_CSV):
+	def __init__(self, window, catalogue, comparison=COMPARISONS["FIRST_vs_LoTSS"]):
 		self.window = window
 		self.catalogue = catalogue
-		self.progress_file = Path(progress_file)
-		self.results_file = Path(results_file)
+		self.surveys = comparison.surveys
+		self.progress_file = Path(comparison.progress_file)
+		self.results_file = Path(comparison.results_file)
 		self.all_ids = [int(source_id) for source_id in catalogue.index]
 		self.decisions = {}
 		self.mode = "all"
@@ -154,7 +152,7 @@ class ReviewApp:
 	# ---------- UI ----------
 
 	def _build_ui(self):
-		self.window.title("FIRST / LoTSS morphology review")
+		self.window.title(f"{' / '.join(self.surveys)} morphology review")
 		self.window.geometry("1250x720")
 		self.window.columnconfigure(0, weight=1)
 		self.window.rowconfigure(1, weight=1)
@@ -166,12 +164,13 @@ class ReviewApp:
 		self.detail_label = ttk.Label(header, font=("Segoe UI", 11))
 		self.detail_label.pack(anchor="w")
 		self.question_label = ttk.Label(
-			header, font=("Segoe UI", 12), text="Do the FIRST and LoTSS images show the same morphology?"
+			header, font=("Segoe UI", 12),
+			text=f"Do the {' and '.join(self.surveys)} images show the same morphology?",
 		)
 		self.question_label.pack(anchor="w", pady=(4, 0))
 
 		self.figure = Figure(figsize=(8.5, 4.3))
-		self.axes = [self.figure.add_subplot(1, 2, k + 1) for k in range(len(SURVEYS))]
+		self.axes = [self.figure.add_subplot(1, len(self.surveys), k + 1) for k in range(len(self.surveys))]
 		self.canvas = FigureCanvasTkAgg(self.figure, master=self.window)
 		self.canvas.get_tk_widget().grid(row=1, column=0, sticky="nsew", padx=8)
 
@@ -244,7 +243,7 @@ class ReviewApp:
 			f"Catalogue: {row['Catalog']}    |    Original label: {row['Original']}    |    "
 			f"Your answer: {DECISION_NAMES.get(decision, 'not answered yet')}"
 		)
-		for axis, survey in zip(self.axes, SURVEYS):
+		for axis, survey in zip(self.axes, self.surveys):
 			self._draw_image(axis, survey, source_id)
 		self.figure.tight_layout()
 		self.canvas.draw_idle()
@@ -365,12 +364,12 @@ class ReviewApp:
 		self.refresh()
 
 
-def main():
+def main(comparison=COMPARISONS["FIRST_vs_LoTSS"]):
 	if not CATALOGUE.exists():
 		raise SystemExit(f"Catalogue not found: {CATALOGUE}")
 	catalogue = pd.read_csv(CATALOGUE, index_col=0)
 	window = tk.Tk()
-	ReviewApp(window, catalogue)
+	ReviewApp(window, catalogue, comparison)
 	window.mainloop()
 
 

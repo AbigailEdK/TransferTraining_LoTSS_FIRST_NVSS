@@ -1,4 +1,10 @@
-"""Compare the sources marked Yes and No in the morphology review (morphologyReview.py).
+"""Compare the sources marked Yes and No in the morphology reviews.
+
+There is one review per survey pair (reviewComparisons.py): FIRST vs LoTSS (morphologyReview.py) and
+FIRST vs NVSS (morphologyReviewNVSS.py). Each comparison is analysed on its own, with its own Yes / No
+answers, and every report names the comparison it presents. By default every comparison with saved
+answers is analysed; name comparisons on the command line to choose, e.g.
+	python morphologyReviewStats.py FIRST_vs_NVSS
 
 For every reviewed source the script reads its FIRST, LoTSS and NVSS images from
 Data/FITS_BY_CHANNEL/<id>_<survey>.fits and measures:
@@ -20,7 +26,7 @@ NOTE: the images are min-max scaled to 0-1 per image, so the pixel values and no
 are relative to each image's own peak, not in Jy/beam. A "noise" of 0.05 means the background
 scatter is 5% of the brightest pixel, i.e. a dynamic range of about 20.
 
-Skipped and unanswered sources are left out. Results are written to Results/MorphologyReviewStats/:
+Skipped and unanswered sources are left out. Results are written to MorphologyReviewStats/<comparison>/:
 	source_features.csv     one row per reviewed source with every measurement
 	numeric_comparison.csv  Yes vs No for each numeric measurement (medians, Mann-Whitney U,
 	                        KS test, Cliff's delta, single-feature AUC, FDR-corrected p-values)
@@ -31,7 +37,8 @@ Skipped and unanswered sources are left out. Results are written to Results/Morp
 
 import ast
 import json
-from pathlib import Path
+import sys
+from functools import lru_cache
 
 import matplotlib
 
@@ -44,20 +51,17 @@ from astropy.io import fits
 from scipy import ndimage
 from scipy.stats import chi2_contingency, ks_2samp, mannwhitneyu, pearsonr, sigmaclip
 
-ROOT = Path(__file__).resolve().parent
-CHANNEL_DIR = ROOT / "Data" / "FITS_BY_CHANNEL"
-FITS_DIR = ROOT / "Data" / "RADCAT_F"
-CATALOGUE = ROOT / "Data" / "RADCAT.csv"
-PROGRESS_FILE = ROOT / "morphology_review_progress.json"
-SPLIT_DIR = ROOT / "Training" / "Results" / "Experiment_0" / "Data"
-OUTPUT_DIR = ROOT / "Results" / "MorphologyReviewStats"
+from reviewComparisons import ALL_SURVEYS, CATALOGUE, CHANNEL_DIR, FITS_DIR, ROOT, selected_comparisons
 
-SURVEYS = ("FIRST", "LoTSS", "NVSS")
+SPLIT_DIR = ROOT / "Training" / "Results" / "Experiment_0" / "Data"
+
+SURVEYS = ALL_SURVEYS
 SURVEY_PAIRS = (("FIRST", "LoTSS"), ("FIRST", "NVSS"), ("LoTSS", "NVSS"))
 DECISIONS = {"yes": "Yes", "no": "No"}
 CLIP_SIGMA = 3.0
 MIN_ISLAND_PIXELS = 5  # islands smaller than this are treated as noise spikes
 CATEGORICAL_COLUMNS = ("Catalog", "Type", "Original", "relabelled", "split", "vote_unanimous")
+MIN_PER_GROUP = 3  # Yes and No answers needed before a comparison can be analysed
 
 # Yes / No colours (categorical slots 1 and 2 of the dataviz reference palette)
 COLOURS = {"Yes": "#2a78d6", "No": "#eb6834"}
@@ -66,9 +70,26 @@ TEXT_MUTED = "#6b6a65"
 
 # ---------- loading ----------
 
-def load_decisions():
-	state = json.loads(PROGRESS_FILE.read_text(encoding="utf-8"))
-	return {int(k): DECISIONS[v] for k, v in state["decisions"].items() if v in DECISIONS}
+def load_raw_decisions(comparison):
+	return json.loads(comparison.progress_file.read_text(encoding="utf-8"))["decisions"]
+
+
+def load_decisions(comparison):
+	return {int(k): DECISIONS[v] for k, v in load_raw_decisions(comparison).items() if v in DECISIONS}
+
+
+def enough_answers(comparison, minimum=MIN_PER_GROUP):
+	"""True when the review has at least `minimum` Yes and `minimum` No answers; otherwise says why not."""
+	if not comparison.progress_file.exists():
+		print(f"[{comparison.label}] no review answers yet ({comparison.progress_file.name} not found), skipped")
+		return False
+	answers = list(load_decisions(comparison).values())
+	n_yes, n_no = answers.count("Yes"), answers.count("No")
+	if n_yes < minimum or n_no < minimum:
+		print(f"[{comparison.label}] only {n_yes} Yes / {n_no} No answers so far "
+			f"(at least {minimum} of each needed), skipped")
+		return False
+	return True
 
 
 def load_split():
@@ -178,6 +199,7 @@ def pair_features(data_a, data_b, mask_a, mask_b):
 	return features
 
 
+@lru_cache(maxsize=None)  # shared by every comparison, so each image is measured once per run
 def source_features(source_id):
 	row = {}
 	images, masks = {}, {}
@@ -323,7 +345,7 @@ def plot_no_rate(counts, column, overall_rate, path):
 	plt.close(fig)
 
 
-def plot_distributions(table, features, path):
+def plot_distributions(table, features, comparison, path):
 	columns = 4
 	rows = int(np.ceil(len(features) / columns))
 	fig, axes = plt.subplots(rows, columns, figsize=(4 * columns, 3 * rows), squeeze=False)
@@ -352,21 +374,22 @@ def plot_distributions(table, features, path):
 		axis.axis("off")
 	handles, labels = axes.flat[0].get_legend_handles_labels()
 	fig.legend(handles, labels, loc="upper right", frameon=False)
-	fig.suptitle("Measurements that differ most between Yes and No (δ = Cliff's delta, No vs Yes)", x=0.01, ha="left")
+	fig.suptitle(f"{comparison.label}: measurements that differ most between Yes and No "
+		"(δ = Cliff's delta, No vs Yes)", x=0.01, ha="left")
 	fig.tight_layout(rect=(0, 0, 1, 0.96))
 	fig.savefig(path, dpi=150)
 	plt.close(fig)
 
 
-def plot_examples(table, path, per_group=6):
-	"""A few randomly chosen Yes and No sources, each shown as FIRST above LoTSS."""
+def plot_examples(table, comparison, path, per_group=6):
+	"""A few randomly chosen Yes and No sources, each shown as the two compared surveys one above the other."""
 	fig, axes = plt.subplots(2 * 2, per_group, figsize=(2 * per_group, 8.5))
 	rng = np.random.default_rng(0)
 	for group, decision in enumerate(("Yes", "No")):
 		ids = table.index[table["decision"] == decision].to_numpy()
 		chosen = rng.choice(ids, size=min(per_group, len(ids)), replace=False)
 		for column, source_id in enumerate(chosen):
-			for offset, survey in enumerate(("FIRST", "LoTSS")):
+			for offset, survey in enumerate(comparison.surveys):
 				axis = axes[2 * group + offset, column]
 				data = load_image(survey, source_id)
 				if data is not None:
@@ -377,7 +400,7 @@ def plot_examples(table, path, per_group=6):
 					axis.set_title(f"{decision}: {source_id}", fontsize=9, color=COLOURS[decision])
 				if column == 0:
 					axis.set_ylabel(survey)
-	fig.suptitle("Random examples (top two rows: Yes, bottom two rows: No)", x=0.01, ha="left")
+	fig.suptitle(f"{comparison.label}: random examples (top two rows: Yes, bottom two rows: No)", x=0.01, ha="left")
 	fig.tight_layout(rect=(0, 0, 1, 0.96))
 	fig.savefig(path, dpi=120)
 	plt.close(fig)
@@ -385,25 +408,32 @@ def plot_examples(table, path, per_group=6):
 
 # ---------- main ----------
 
-def main():
-	OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+def run(comparison):
+	"""Statistics for one comparison's review, written to comparison.output_dir."""
+	output_dir = comparison.output_dir
+	output_dir.mkdir(parents=True, exist_ok=True)
 	catalogue = pd.read_csv(CATALOGUE, index_col=0)
-	decisions = load_decisions()
+	decisions = load_decisions(comparison)
 	reviewed_ids = [i for i in catalogue.index if int(i) in decisions]
-	print(f"Measuring {len(reviewed_ids)} reviewed sources ...")
+	print(f"[{comparison.label}] measuring {len(reviewed_ids)} reviewed sources ...")
 
 	measurements = pd.DataFrame(
 		[source_features(int(i)) for i in reviewed_ids], index=pd.Index(reviewed_ids, name="id")
 	)
 	table = catalogue_features(catalogue.loc[reviewed_ids], load_split()).join(measurements)
 	table.insert(0, "decision", [decisions[int(i)] for i in table.index])
-	table.to_csv(OUTPUT_DIR / "source_features.csv")
+	table.to_csv(output_dir / "source_features.csv")
 
-	lines = []
+	first, second = comparison.surveys
+	lines = [
+		f"COMPARISON: {comparison.label}  (Yes = the {first} and {second} images show the same morphology)",
+		f"Review answers: {comparison.progress_file.name}",
+		"",
+	]
 	n_yes, n_no = (table["decision"] == "Yes").sum(), (table["decision"] == "No").sum()
 	overall_rate = n_no / len(table)
 	lines.append(f"Reviewed sources: {len(table)}   Yes: {n_yes}   No: {n_no}   No-rate: {overall_rate:.1%}")
-	skipped = sum(1 for v in json.loads(PROGRESS_FILE.read_text(encoding="utf-8"))["decisions"].values() if v == "skip")
+	skipped = sum(1 for v in load_raw_decisions(comparison).values() if v == "skip")
 	lines.append(f"Skipped (excluded): {skipped}   Not yet reviewed: {len(catalogue) - len(table) - skipped}")
 	for survey in SURVEYS:
 		missing = (~table[f"{survey}_available"]).sum()
@@ -413,36 +443,42 @@ def main():
 	lines.append("\n=== Catalogue information (No-rate per category) ===")
 	for column in CATEGORICAL_COLUMNS:
 		counts, p, low_expected = compare_categorical(table, column)
-		counts.to_csv(OUTPUT_DIR / f"categorical_{column}.csv")
+		counts.to_csv(output_dir / f"categorical_{column}.csv")
 		warning = "  (some expected counts < 5, treat p with care)" if low_expected else ""
 		lines.append(f"\n{column}: chi-squared p = {p:.2e}{warning}")
 		for name, row in counts.iterrows():
 			lines.append(f"  {str(name):<14} {int(row['No']):>4} / {int(row['total']):<5} No  ({row['no_rate']:.1%})")
 		if counts.shape[0] > 1:
-			plot_no_rate(counts, column, overall_rate, OUTPUT_DIR / f"no_rate_by_{column}.png")
+			plot_no_rate(counts, f"{column} ({comparison.label})", overall_rate, output_dir / f"no_rate_by_{column}.png")
 
-	comparison = compare_numeric(table)
-	comparison.to_csv(OUTPUT_DIR / "numeric_comparison.csv", index=False)
+	numeric = compare_numeric(table)
+	numeric.to_csv(output_dir / "numeric_comparison.csv", index=False)
 	lines.append("\n=== Numeric measurements, sorted by effect size ===")
 	lines.append("Cliff's delta > 0 means No sources tend to have larger values. |delta| ~0.15 small, ~0.33 medium, ~0.47 large.")
 	lines.append("AUC = how well that one measurement alone separates Yes from No (0.5 = not at all, 1 = perfectly).")
 	lines.append(f"{'feature':<44}{'median Yes':>12}{'median No':>12}{'delta':>8}{'AUC':>6}{'p (FDR)':>10}")
-	for _, row in comparison.iterrows():
+	for _, row in numeric.iterrows():
 		lines.append(
 			f"{row['feature']:<44}{row['median_yes']:>12.4g}{row['median_no']:>12.4g}"
 			f"{row['cliffs_delta_no_vs_yes']:>+8.2f}{row['auc_single_feature']:>6.2f}{row['mannwhitney_p_fdr']:>10.1e}"
 		)
 
-	top = comparison.head(16)
+	top = numeric.head(16)
 	plot_distributions(table, list(zip(top["feature"], top["cliffs_delta_no_vs_yes"], top["mannwhitney_p_fdr"])),
-		OUTPUT_DIR / "top_feature_distributions.png")
-	plot_examples(table, OUTPUT_DIR / "example_images.png")
+		comparison, output_dir / "top_feature_distributions.png")
+	plot_examples(table, comparison, output_dir / "example_images.png")
 
 	report = "\n".join(lines)
 	print(report)
-	(OUTPUT_DIR / "summary.txt").write_text(report, encoding="utf-8")
-	print(f"\nResults written to {OUTPUT_DIR}")
+	(output_dir / "summary.txt").write_text(report, encoding="utf-8")
+	print(f"\n[{comparison.label}] results written to {output_dir}\n")
+
+
+def main(names=()):
+	for comparison in selected_comparisons(names):
+		if enough_answers(comparison):
+			run(comparison)
 
 
 if __name__ == "__main__":
-	main()
+	main(sys.argv[1:])

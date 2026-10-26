@@ -1,3 +1,6 @@
+COMPARISON: FIRST vs LoTSS  (Yes = the FIRST and LoTSS images show the same morphology)
+Review answers: morphology_review_progress.json
+
 Reviewed sources: 2510   Yes: 2129   No: 381   No-rate: 15.2%
 Skipped (excluded): 0   Not yet reviewed: 0
 
@@ -31,9 +34,10 @@ relabelled: chi-squared p = 6.49e-02  (some expected counts < 5, treat p with ca
   unchanged       381 / 2485  No  (15.3%)
   changed           0 / 25    No  (0.0%)
 
-split: chi-squared p = 3.51e-01
-  train_val       312 / 2008  No  (15.5%)
-  test             69 / 502   No  (13.7%)
+split: chi-squared p = 0.00e+00
+  train_val         0 / 1703  No  (0.0%)
+  test              0 / 426   No  (0.0%)
+  not used        381 / 381   No  (100.0%)
 
 vote_unanimous: chi-squared p = 6.49e-02  (some expected counts < 5, treat p with care)
   unanimous       381 / 2485  No  (15.3%)

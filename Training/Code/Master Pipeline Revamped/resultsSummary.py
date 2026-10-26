@@ -129,6 +129,7 @@ def output_dirs():
     dirs = {name: SUMMARY_DIRECTORY / name for name in ["csv", "latex", "figures"]}
     for sub in ["search", "training", "testing", "ablation", "learning_curves", "confusion_matrices"]:
         dirs[sub] = dirs["figures"] / sub
+    dirs["search_heatmaps"] = dirs["search"] / "heatmaps"
     for path in dirs.values():
         path.mkdir(parents=True, exist_ok=True)
     return dirs
@@ -670,34 +671,76 @@ def plot_search_overview(best, scratch, dirs):
     fig.tight_layout()
     save_figure(fig, dirs["search"] / "search_overview_combined.png")
 
+SEARCH_AXES = {"lr": "Learning rate", "reg": "L2 coefficient", "wd": "Weight decay"}
+SEARCH_PAIRS = [("lr", "reg"), ("reg", "wd"), ("lr", "wd")] # | (rows, columns): LR vs L2, L2 vs WD, LR vs WD
+
+def tick_label(value):
+    if value == 0:
+        return "0"
+    mantissa = value / 10**np.floor(np.log10(abs(value)))
+    return f"{value:.0e}" if np.isclose(mantissa, 1) else f"{value:.1e}"
+
+def draw_search_heatmap(ax, df, rows, columns, norm=None):
+    '''
+    Best mean validation loss for each (rows, columns) pair of hyperparameters, minimising over the third. The box marks the best cell.
+    '''
+    pivot = df.pivot_table(index=rows, columns=columns, values="val_loss_mean", aggfunc="min").sort_index(ascending=False)
+    image = annotate_heatmap(ax, pivot.values, cmap=SEQUENTIAL.reversed(), norm=norm)
+    best = np.unravel_index(np.nanargmin(pivot.values), pivot.values.shape)
+    ax.add_patch(plt.Rectangle((best[1] - 0.5, best[0] - 0.5), 1, 1, fill=False, edgecolor=INK, linewidth=1.5))
+    ax.set_xticks(range(len(pivot.columns)))
+    ax.set_xticklabels([tick_label(v) for v in pivot.columns], rotation=45, ha="right", fontsize=6)
+    ax.set_yticks(range(len(pivot.index)))
+    ax.set_yticklabels([tick_label(v) for v in pivot.index], fontsize=6)
+    ax.set_xlabel(SEARCH_AXES[columns])
+    ax.set_ylabel(SEARCH_AXES[rows])
+    return image
+
+def survey_norm(df):
+    return Normalize(df["val_loss_mean"].min(), df["val_loss_mean"].max())
+
 def plot_search_heatmaps(df, stage, dirs):
     '''
-    Learning rate x L2 coefficient heatmap per input, showing the best validation loss over the weight decays.
+    For every input, the three hyperparameter planes side by side (LR vs L2, L2 vs WD, LR vs WD), each showing the best mean
+    validation loss over the hyperparameter left out, on one colour scale per input. Saves one figure per input, a combined
+    figure with one row per input, and the LR vs L2 overview of every input.
     '''
     surveys = [s for s in ALL_SURVEYS if s in set(df["model"])]
+    for survey in surveys:
+        part = df[df["model"] == survey]
+        norm = survey_norm(part)
+        fig, axes = plt.subplots(1, 3, figsize=(7.5, 2.6), layout="constrained")
+        for ax, (rows, columns) in zip(axes, SEARCH_PAIRS):
+            image = draw_search_heatmap(ax, part, rows, columns, norm=norm)
+        fig.colorbar(image, ax=list(axes), label="Mean validation loss", shrink=0.9)
+        fig.suptitle(f"{stage.title()} search, {survey}: best mean validation loss over the third hyperparameter (darker is lower, box is best)", fontsize=9)
+        save_figure(fig, dirs["search_heatmaps"] / f"search_heatmaps_{stage.lower()}_{survey}.png")
+
+    if len(surveys) > 1:
+        fig, axes = plt.subplots(len(surveys), 3, figsize=(7.5, 2.3 * len(surveys)), layout="constrained", squeeze=False)
+        for row, survey in zip(axes, surveys):
+            part = df[df["model"] == survey]
+            norm = survey_norm(part)
+            for ax, (rows, columns) in zip(row, SEARCH_PAIRS):
+                draw_search_heatmap(ax, part, rows, columns, norm=norm)
+            row[1].set_title(survey, fontsize=10, fontweight="bold")
+        fig.suptitle(f"{stage.title()} search: best mean validation loss over the third hyperparameter\n(colour scaled per input, darker is lower, box is best)", fontsize=10)
+        save_figure(fig, dirs["search"] / f"search_heatmaps_{stage.lower()}_combined.png")
+
+    # > Overview: LR vs L2 for every input in one grid
     columns = min(4, len(surveys))
     rows = int(np.ceil(len(surveys) / columns))
     fig, axes = plt.subplots(rows, columns, figsize=(2.3 * columns, 2.1 * rows), squeeze=False)
     for ax, survey in zip(axes.flat, surveys):
-        pivot = df[df["model"] == survey].pivot_table(index="lr", columns="reg", values="val_loss_mean", aggfunc="min")
-        pivot = pivot.sort_index(ascending=False)
-        image = annotate_heatmap(ax, pivot.values, cmap=SEQUENTIAL.reversed())
-        best = np.unravel_index(np.nanargmin(pivot.values), pivot.values.shape)
-        ax.add_patch(plt.Rectangle((best[1] - 0.5, best[0] - 0.5), 1, 1, fill=False, edgecolor=INK, linewidth=1.5))
-        ax.set_xticks(range(len(pivot.columns)))
-        ax.set_xticklabels([f"{v:.0e}" if v else "0" for v in pivot.columns], rotation=45, ha="right", fontsize=6)
-        ax.set_yticks(range(len(pivot.index)))
-        ax.set_yticklabels([f"{v:.0e}" for v in pivot.index], fontsize=6)
+        draw_search_heatmap(ax, df[df["model"] == survey], "lr", "reg")
         ax.set_title(survey)
-        ax.set_xlabel("L2 coefficient")
-        ax.set_ylabel("Learning rate")
     for ax in list(axes.flat)[len(surveys):]:
         ax.axis("off")
     fig.suptitle(f"{stage.title()} search: best mean validation loss over weight decay (darker is lower, box is best)", fontsize=10)
     fig.tight_layout()
     save_figure(fig, dirs["search"] / f"search_heatmaps_{stage.lower()}.png")
 
-SENSITIVITY_GROUPS = {"single": SINGLE_CHANNEL, "combined": DUO_CHANNEL + TRIO_CHANNEL}
+SENSITIVITY_GROUPS = {"single": SINGLE_CHANNEL, "multichannel": DUO_CHANNEL + TRIO_CHANNEL}
 SENSITIVITY_PARAMETERS = [("lr", "Learning rate", "log"), ("reg", "L2 coefficient", "symlog"), ("wd", "Weight decay", "log")]
 
 def draw_sensitivity(axes, df, surveys, group):
