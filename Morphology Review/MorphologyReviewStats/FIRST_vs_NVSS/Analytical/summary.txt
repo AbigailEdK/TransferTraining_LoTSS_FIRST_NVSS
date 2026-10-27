@@ -1,0 +1,114 @@
+COMPARISON: FIRST vs NVSS  (rule calibrated on morphology_review_FIRST_vs_NVSS_progress.json)
+
+ANALYTICAL RULE (image measurements only, no catalogue information)
+  Yes  if  NVSS_peak_snr <= 60.7
+  chosen by 5-fold cross-validated balanced accuracy: 0.685 +/- 0.031
+  balanced accuracy of the refitted rule on all sources: 0.694
+
+  Best cross-validated rule of each size:
+    1 measurement(s): NVSS_peak_snr  (0.685 +/- 0.031)
+    2 measurement(s): NVSS_peak_snr AND FIRST_vs_NVSS_log_size_ratio  (0.683 +/- 0.028)
+
+AGREEMENT WITH THE MANUAL REVIEW
+  63.0% of 395 sources agree   Cohen's kappa = 0.297
+  manual Yes kept as Yes: 54.9%   manual No kept as No: 83.8%
+
+            Analytical Yes  Analytical No
+Manual Yes             156            128
+Manual No               18             93
+
+  146 disagreements written to disagreements.csv
+
+RECALCULATED STATISTICS (analytical labels)   Yes: 174   No: 221   No-rate: 55.9%
+  Measurements used by the rule separate the groups perfectly by construction.
+feature                                       median Yes   median No   delta   AUC   p (FDR)
+  NVSS_peak_snr                                    18.13       404.5   +1.00  1.00   9.3e-64
+  NVSS_noise                                     0.05178    0.002463   -1.00  1.00   9.3e-64
+  NVSS_noise_mad                                 0.04729    0.006316   -0.99  0.99   1.6e-62
+  NVSS_median                                    0.06104     0.00767   -0.95  0.98   3.0e-58
+  NVSS_background                                0.05388    0.004321   -0.92  0.96   5.9e-55
+  NVSS_n_pix_5sigma                                 1900        5400   +0.92  0.96   6.0e-55
+  NVSS_mean                                       0.1468     0.08203   -0.92  0.96   3.3e-54
+  NVSS_largest_island_pix                           2500        5801   +0.90  0.95   7.4e-53
+  NVSS_n_pix_3sigma                                 2602        5852   +0.90  0.95   2.0e-52
+  NVSS_frac_pix_3sigma                            0.1588      0.3572   +0.90  0.95   2.0e-52
+  LoTSS_noise_mad                               0.005676   0.0005492   -0.84  0.92   7.7e-46
+  LoTSS_noise                                   0.004674   0.0005654   -0.82  0.91   2.6e-43
+  LoTSS_peak_snr                                   209.2        1755   +0.82  0.91   2.7e-43
+  FIRST_median                                   0.07142    0.005662   -0.77  0.88   1.6e-38
+  FIRST_background                               0.07066     0.00566   -0.77  0.88   1.6e-38
+  FIRST_peak_snr                                   52.32        1089   +0.77  0.88   1.8e-38
+  FIRST_noise                                    0.01778   0.0009146   -0.77  0.88   1.8e-38
+  FIRST_noise_mad                                0.01834    0.000947   -0.77  0.88   1.8e-38
+  FIRST_mean                                     0.07405    0.008267   -0.76  0.88   1.0e-37
+  LoTSS_mean                                     0.03178     0.01033   -0.73  0.87   3.8e-35
+  LoTSS_median                                   0.01894    0.005997   -0.71  0.85   4.2e-33
+  LoTSS_vs_NVSS_log_size_ratio                   -0.2529     -0.7509   -0.70  0.85   1.7e-32
+  LoTSS_background                               0.01749    0.005991   -0.69  0.84   2.1e-31
+  NVSS_largest_island_extent_px                     65.8       91.76   +0.64  0.82   5.1e-27
+  NVSS_centroid_offset_px                           3.19      0.7863   -0.60  0.80   2.0e-24
+  FIRST_vs_LoTSS_pearson_r                        0.6951      0.8368   +0.60  0.80   2.6e-24
+  FIRST_centroid_offset_px                         3.665      0.8537   -0.58  0.79   1.4e-22
+  FIRST_vs_LoTSS_log_size_ratio                  -0.6608      -0.423   +0.57  0.79   4.1e-22
+  LoTSS_vs_NVSS_log_snr_ratio                      1.023      0.6352   -0.56  0.78   6.6e-21
+  NVSS_largest_island_axis_ratio                  0.7496       0.895   +0.53  0.76   8.4e-19
+  LoTSS_emission_flux                              175.4       63.15   -0.50  0.75   2.7e-17
+  LoTSS_centroid_offset_px                         6.824       1.845   -0.48  0.74   7.9e-16
+  LoTSS_largest_island_extent_px                   79.81       41.49   -0.48  0.74   9.6e-16
+  LoTSS_largest_island_axis_ratio                 0.4477      0.6632   +0.47  0.73   3.5e-15
+  FIRST_vs_NVSS_log_size_ratio                    -1.032      -1.224   -0.43  0.72   2.4e-13
+  LoTSS_n_islands                                      5           8   +0.43  0.71   5.4e-13
+  LoTSS_vs_NVSS_mask_iou                          0.2717       0.164   -0.42  0.71   8.5e-13
+  FIRST_vs_LoTSS_mask_iou                         0.1781        0.25   +0.41  0.70   8.3e-12
+  LoTSS_n_pix_3sigma                                1840         971   -0.38  0.69   1.6e-10
+  LoTSS_frac_pix_3sigma                           0.1123     0.05927   -0.38  0.69   1.6e-10
+  LoTSS_largest_island_pix                          1628         724   -0.37  0.68   5.6e-10
+  LoTSS_std                                      0.05423     0.04101   -0.37  0.68   6.4e-10
+  LoTSS_vs_NVSS_pearson_r                         0.5529      0.4288   -0.36  0.68   1.2e-09
+  FIRST_vs_NVSS_mask_iou                         0.08253     0.05222   -0.34  0.67   9.5e-09
+  LoTSS_n_pix_5sigma                                1366         670   -0.33  0.66   4.4e-08
+  FIRST_std                                      0.04134     0.03209   -0.33  0.66   4.5e-08
+  NVSS_std                                        0.1965      0.1812   -0.32  0.66   9.3e-08
+  FIRST_vs_NVSS_log_snr_ratio                     0.4939      0.2774   -0.30  0.65   4.5e-07
+  FIRST_vs_LoTSS_log_snr_ratio                   -0.6619      -0.379   +0.28  0.64   2.3e-06
+  FIRST_largest_island_axis_ratio                 0.4773      0.6121   +0.24  0.62   5.7e-05
+  LoTSS_largest_island_frac_of_emission           0.9182       0.805   -0.24  0.62   8.1e-05
+  FIRST_emission_flux                              54.21       37.63   -0.23  0.62   1.1e-04
+  FIRST_largest_island_frac_of_emission           0.6093      0.7373   +0.23  0.61   1.2e-04
+  FIRST_n_pix_5sigma                               170.5         214   +0.20  0.60   9.6e-04
+  NVSS_emission_flux                                1116        1163   +0.20  0.60   1.1e-03
+  NVSS_blank_frac                               0.006104    0.006104   +0.18  0.59   2.3e-03
+  NVSS_largest_island_frac_of_emission                 1           1   +0.17  0.58   1.0e-05
+  NVSS_n_islands                                       1           1   -0.15  0.57   1.4e-04
+  FIRST_largest_island_pix                           189         221   +0.14  0.57   1.9e-02
+  RA/deg                                           167.7       179.8   +0.10  0.55   1.1e-01
+  FIRST_frac_pix_3sigma                           0.0181     0.01929   +0.09  0.55   1.2e-01
+  FIRST_n_pix_3sigma                               296.5         316   +0.09  0.55   1.2e-01
+  FIRST_n_islands                                      4           4   +0.08  0.54   1.8e-01
+  FIRST_blank_frac                             6.104e-05   6.104e-05   -0.06  0.53   2.2e-01
+  FIRST_largest_island_extent_px                   25.78       23.16   -0.05  0.52   4.6e-01
+  NVSS_saturated_frac                           0.006104    0.006104   -0.04  0.52   2.1e-01
+  vote_agreement                                       1           1   +0.03  0.52   7.3e-02
+  n_votes                                              1           1   -0.03  0.52   7.4e-02
+  n_distinct_vote_labels                               1           1   -0.03  0.52   7.4e-02
+  DEC/deg                                          39.91        40.9   +0.03  0.51   6.8e-01
+  FIRST_saturated_frac                         6.104e-05   6.104e-05   +0.01  0.51   8.3e-01
+  FIRST_vs_NVSS_pearson_r                         0.3328      0.3311   +0.00  0.50   9.8e-01
+
+POST-HOC BREAKDOWN (catalogue information was not used by the rule)
+
+  Catalog: chi-squared p = 7.52e-19
+    RGD              67 / 111   No  (60.4%)
+    CoNFIG           63 / 65    No  (96.9%)
+    FRICAT           13 / 55    No  (23.6%)
+    FRGMRC           21 / 41    No  (51.2%)
+    CRUMB            17 / 36    No  (47.2%)
+    FRIICAT          10 / 32    No  (31.2%)
+    AT17             24 / 27    No  (88.9%)
+    FR0CAT            6 / 26    No  (23.1%)
+    FRDEEP            0 / 2     No  (0.0%)
+
+  Type: chi-squared p = 2.40e-15
+    FRI              45 / 150   No  (30.0%)
+    FRII            112 / 150   No  (74.7%)
+    COMPACT          64 / 95    No  (67.4%)

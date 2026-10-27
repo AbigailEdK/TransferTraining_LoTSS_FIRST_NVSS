@@ -37,7 +37,10 @@ from sklearn.metrics import (
 # endregion
 
 # region PATHS
-from paths import RESULTSDIRECTORY, SOURCEDATADIRECTORY
+# > Results are found relative to this script (Training/Code/Master Pipeline Revamped -> Training/Results), so the same file
+# > works on the Desktop and on the cluster without editing paths.py
+RESULTSDIRECTORY = Path(__file__).resolve().parents[2] / "Results"
+SOURCEDATADIRECTORY = RESULTSDIRECTORY / "SourceData"
 # endregion
 
 # region SETTINGS

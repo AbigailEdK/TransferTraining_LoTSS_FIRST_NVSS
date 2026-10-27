@@ -1,0 +1,27 @@
+% FIRST vs NVSS morphology review
+\begin{table*}
+\centering
+\caption{FIRST vs NVSS: image measurements for sources whose FIRST and NVSS images were judged to show the same morphology (Yes, $n=284$) and those that did not (No, $n=111$). Values are medians with the interquartile range in brackets. Noise is the standard deviation of the $3\sigma$-clipped image as a fraction of the image peak. $\delta$ is Cliff's delta (positive when No values are larger) with a bootstrap 95\% interval; AUC is the area under the ROC curve when the measurement alone separates the groups; $p$ is the Mann--Whitney $U$ test, Benjamini--Hochberg corrected.}
+\label{tab:morphology_review_FIRST_vs_NVSS}
+\begin{tabular}{lccccc}
+\hline
+Measurement & Yes & No & $\delta$ & AUC & $p$ \\
+\hline
+FIRST peak S/N & 104 [42, 1447] & 198 [87, 1950] & $+0.14$ $[+0.03, +0.26]$ & 0.57 & 0.042 \\
+FIRST noise ($\sigma$ / peak) & 0.0091 [0.00069, 0.022] & 0.005 [0.00051, 0.011] & $-0.14$ $[-0.26, -0.02]$ & 0.57 & 0.042 \\
+FIRST pixels $>3\sigma$ & 307 [186, 541] & 325 [234, 428] & $+0.02$ $[-0.10, +0.13]$ & 0.51 & 0.825 \\
+FIRST largest component extent (arcsec) & 35 [21, 56] & 38 [30, 49] & $+0.07$ $[-0.04, +0.18]$ & 0.54 & 0.336 \\
+FIRST emission offset from centre (arcsec) & 3.2 [1.2, 9.0] & 1.3 [0.79, 2.7] & $-0.34$ $[-0.45, -0.23]$ & 0.67 & $1.7\times10^{-6}$ \\
+NVSS peak S/N & 49 [15, 312] & 154 [86, 897] & $+0.36$ $[+0.26, +0.46]$ & 0.68 & $3.1\times10^{-7}$ \\
+NVSS noise ($\sigma$ / peak) & 0.02 [0.0032, 0.058] & 0.0064 [0.0011, 0.011] & $-0.36$ $[-0.46, -0.26]$ & 0.68 & $3.1\times10^{-7}$ \\
+NVSS pixels $>3\sigma$ & 4152 [2447, 5814] & 5003 [3980, 6302] & $+0.28$ $[+0.16, +0.40]$ & 0.64 & $5.8\times10^{-5}$ \\
+NVSS largest component extent (arcsec) & 126 [97, 141] & 129 [115, 144] & $+0.15$ $[+0.04, +0.26]$ & 0.58 & 0.035 \\
+NVSS emission offset from centre (arcsec) & 3.0 [1.2, 9.1] & 1.3 [0.84, 2.7] & $-0.32$ $[-0.43, -0.19]$ & 0.66 & $9.2\times10^{-6}$ \\
+LoTSS peak S/N & 391 [176, 1485] & 775 [387, 3231] & $+0.26$ $[+0.15, +0.38]$ & 0.63 & $1.6\times10^{-4}$ \\
+LoTSS pixels $>3\sigma$ & 1196 [708, 2466] & 983 [672, 1412] & $-0.18$ $[-0.29, -0.08]$ & 0.59 & 0.011 \\
+FIRST-NVSS pixel correlation $r$ & 0.3 [0.23, 0.42] & 0.36 [0.32, 0.43] & $+0.24$ $[+0.12, +0.36]$ & 0.62 & $7.1\times10^{-4}$ \\
+FIRST-NVSS $3\sigma$ mask overlap (IoU) & 0.068 [0.031, 0.12] & 0.054 [0.044, 0.08] & $-0.09$ $[-0.20, +0.02]$ & 0.55 & 0.207 \\
+$\log_{10}$ FIRST/NVSS emission size & $-$1.1 [$-$1.3, $-$0.86] & $-$1.2 [$-$1.3, $-$1.1] & $-0.13$ $[-0.24, -0.02]$ & 0.57 & 0.058 \\
+\hline
+\end{tabular}
+\end{table*}
