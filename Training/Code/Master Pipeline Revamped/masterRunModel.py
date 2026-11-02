@@ -27,7 +27,8 @@ os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0' # Stops the numerical result warnings
 import numpy as np
 import masterProcess as process
 from tensorflow.keras.optimizers import AdamW
-from tensorflow.keras.callbacks import Callback, EarlyStopping
+from tensorflow.keras.callbacks import Callback, EarlyStopping, ReduceLROnPlateau
+from tensorflow.keras.metrics import CategoricalCrossentropy
 import re
 from masterModels import get_model, load_model_from_base
 from sys import argv
@@ -42,7 +43,7 @@ from paths import HOME_DIR, PROJECT_ROOT, RESULTSDIRECTORY
 # endregion
 
 # region CONSTANTS
-from constants import BATCH_SIZE, SIZE_PER_TYPE
+from constants import BATCH_SIZE, SIZE_PER_TYPE, MONITOR, EARLY_STOPPING_PATIENCE, REDUCE_LR_PATIENCE, REDUCE_LR_FACTOR, MIN_LEARNING_RATE
 # endregion
 
 # region BOOLS
@@ -50,6 +51,17 @@ from bools import TESTING, TRANSFER_LEARNING
 # endregion
 
 # region FUNCTIONS
+def training_callbacks():
+    '''
+    Early stopping and a learning-rate schedule, both on the validation cross-entropy without the L2 penalty (MONITOR). The
+    learning rate is halved after REDUCE_LR_PATIENCE epochs without improvement, and training stops after EARLY_STOPPING_PATIENCE,
+    restoring the best epoch's weights. A fresh pair per fit, since callbacks keep state.
+    '''
+    return [
+        ReduceLROnPlateau(monitor=MONITOR, factor=REDUCE_LR_FACTOR, patience=REDUCE_LR_PATIENCE, min_delta=0.001, min_lr=MIN_LEARNING_RATE, verbose=1),
+        EarlyStopping(monitor=MONITOR, patience=EARLY_STOPPING_PATIENCE, min_delta=0.001, restore_best_weights=True, verbose=1),
+    ]
+
 def experiment(**kwargs):
     '''
     ARGUMENTS:
@@ -145,7 +157,7 @@ def run_experiment(X_train_val, y_train_val, X_test, names_train_val, folds, cf)
         model.compile(
             optimizer=AdamW(learning_rate=cf.LEARNING_RATE, weight_decay=cf.WEIGHT_DECAY),
             loss='categorical_crossentropy',
-            metrics=["accuracy"]  
+            metrics=["accuracy", CategoricalCrossentropy(name="crossentropy")] # | Cross-entropy without the L2 penalty, monitored below
         )
 
         print("Training Model...")
@@ -170,25 +182,17 @@ def run_experiment(X_train_val, y_train_val, X_test, names_train_val, folds, cf)
         #             callbacks=[epoch_checkpoint]
         #         ).history
 
-        early_stopping = EarlyStopping(
-            monitor='val_loss',
-            patience=5,
-            min_delta=0.001,
-            restore_best_weights=True,
-            verbose=1
-        )
-
         training_start = perf_counter()
         loss = model.fit(
             X_train, encoded_y_train,
             validation_data=(X_val, encoded_y_val),
             epochs=cf.EPOCH_CEILING,          # Now a ceiling, not a target (40 epochs)
             batch_size=BATCH_SIZE,
-            callbacks=[early_stopping]
+            callbacks=training_callbacks()
         ).history
         training_time_seconds = perf_counter() - training_start
 
-        best_epoch = int(np.argmin(loss['val_loss'])) + 1
+        best_epoch = int(np.argmin(loss[MONITOR])) + 1
         best_epochs.append(best_epoch)
         print(f"\nEarly stopping selected epoch {best_epoch} for fold {kfold+1}.")
         # model.save(f"{cf.SAVE_DIR}model_{best_epoch}e_fold_{kfold+1}.keras")
@@ -319,7 +323,7 @@ def run_transfer_learning(X_train_val, y_train_val, X_test, names_train_val, fol
         model.compile(
             optimizer=AdamW(learning_rate=cf.LEARNING_RATE*10, weight_decay=cf.WEIGHT_DECAY), # Same LR for output layer training
             loss='categorical_crossentropy',
-            metrics=["accuracy"]  
+            metrics=["accuracy", CategoricalCrossentropy(name="crossentropy")] # | Cross-entropy without the L2 penalty, monitored below
         )
 
         print("Training model output layer...")
@@ -339,30 +343,22 @@ def run_transfer_learning(X_train_val, y_train_val, X_test, names_train_val, fol
         model.compile(
             optimizer=AdamW(learning_rate=cf.LEARNING_RATE, weight_decay=cf.WEIGHT_DECAY), # Recompile at a lower LR
             loss='categorical_crossentropy',
-            metrics=["accuracy"]  
+            metrics=["accuracy", CategoricalCrossentropy(name="crossentropy")] # | Cross-entropy without the L2 penalty, monitored below
         )
 
         print("Training entire model from base...")
-
-        early_stopping = EarlyStopping(
-            monitor='val_loss',
-            patience=5,
-            min_delta=0.001,
-            restore_best_weights=True,
-            verbose=1
-        )
 
         loss = model.fit(
             X_train, encoded_y_train,
             validation_data=(X_val, encoded_y_val),
             epochs=cf.EPOCH_CEILING - 5,      # cf.EPOCH_CEILING is now a ceiling
             batch_size=BATCH_SIZE,
-            callbacks=[early_stopping]
+            callbacks=training_callbacks()
         ).history
 
         training_time_seconds = perf_counter() - training_start
 
-        best_phase2_epoch = int(np.argmin(loss['val_loss'])) + 1
+        best_phase2_epoch = int(np.argmin(loss[MONITOR])) + 1
         total_best_epoch = 5 + best_phase2_epoch
         best_fine_tune_epochs.append(total_best_epoch)
         print(f"\nFold {kfold+1}: best phase-2 epoch = {best_phase2_epoch} (total: {total_best_epoch})")
@@ -628,7 +624,11 @@ def runModel(experiments, experiment_number, stage="FINAL", max_folds=None, run_
                     print(f"Absolute path: {folder}")
                     current_dir = str(folder)
                     
-                    transfer_parameters = process.extract_parameters_from_folder_name(folder.name) # | Extract parameters from the folder name for testing
+                    try: # | Extract parameters from the folder name; folders in an older format are skipped
+                        transfer_parameters = process.extract_parameters_from_folder_name(folder.name)
+                    except ValueError:
+                        print(f"Skipping '{folder.name}': not a results folder in the current naming format (e.g. from an older run).")
+                        continue
 
                     # ! base_model = "NONE" -> the true base model will be transfer_parameters["model"]
                     # ! Note that surveys = model here. 
@@ -721,7 +721,11 @@ def runModel(experiments, experiment_number, stage="FINAL", max_folds=None, run_
                 print(f"Absolute path: {folder}")
                 current_dir = str(folder)
                 
-                test_parameters = process.extract_parameters_from_folder_name(folder.name) # | Extract parameters from the folder name for testing
+                try: # | Extract parameters from the folder name; folders in an older format are skipped
+                    test_parameters = process.extract_parameters_from_folder_name(folder.name)
+                except ValueError:
+                    print(f"Skipping '{folder.name}': not a results folder in the current naming format (e.g. from an older run).")
+                    continue
 
                 # | parameters = {
                 # |     "base_model": match.group(1),

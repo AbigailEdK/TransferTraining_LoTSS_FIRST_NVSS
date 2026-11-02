@@ -1,3 +1,3 @@
-TRAINING = True
-TESTING = False
+TRAINING = False
+TESTING = True
 TRANSFER_LEARNING = False

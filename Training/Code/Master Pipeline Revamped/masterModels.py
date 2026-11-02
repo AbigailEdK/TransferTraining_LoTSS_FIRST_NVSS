@@ -7,13 +7,14 @@
 # endregion
 
 # region IMPORTS
-from tensorflow.keras.layers import Conv2D, Dense, Dropout, Flatten, MaxPooling2D, InputLayer, LSTM, Bidirectional #type: ignore
+from tensorflow.keras.layers import Conv2D, Dense, Dropout, Flatten, MaxPooling2D, InputLayer, LSTM, Bidirectional, RandomFlip, RandomRotation #type: ignore
 from tensorflow.keras import Sequential #type: ignore
 from tensorflow.keras import initializers, regularizers, models #type: ignore
 import os
 from tensorflow.keras import backend as K #type: ignore
 import gc
 import masterProcess as process
+from constants import ONLINE_AUGMENTATION
 # endregion
 
 # region FUNCTIONS
@@ -66,6 +67,13 @@ def ConvXpress(cf, input_shape, num_classes):
 
     model = Sequential()
     model.add(InputLayer(input_shape=input_shape))
+
+    # > On-the-fly augmentation: a new random flip and rotation (any angle) of every image each epoch, the same transform on every
+    #   channel. Only active while training (fit), so validation, testing and predict see the images unchanged. The images are
+    #   normalised to [0, 1] per channel, so the corners left by a rotation are filled with 0, as in masterDataAugmentation.py.
+    if ONLINE_AUGMENTATION:
+        model.add(RandomFlip("horizontal_and_vertical", seed=cf.SEED))
+        model.add(RandomRotation(0.5, fill_mode="constant", fill_value=0.0, seed=cf.SEED))
 
     model.add(Conv2D(32, kernel_size=(3, 3),strides=pool_stride,activation='relu',padding='same', kernel_initializer=initializers.he_normal(seed=cf.SEED),bias_initializer='zeros'))
 
@@ -174,9 +182,14 @@ def load_model_from_base(cf, input_shape, num_classes, fold):
 
   # 4. Deep-copy weights layer-by-layer up to the penultimate layer
   # This leaves the final Dense layer untouched with its fresh, random initialization
-  for i in range(len(new_model.layers) - 1):
-    pretrained_weights = pretrained_model.layers[i].get_weights()
-    new_model.layers[i].set_weights(pretrained_weights)
+  # > Only layers with weights are matched, so a base model trained with or without the augmentation layers (which have no
+  #   weights) still lines up with the new model
+  pretrained_layers = [layer for layer in pretrained_model.layers if layer.get_weights()]
+  new_layers = [layer for layer in new_model.layers if layer.get_weights()]
+  if len(pretrained_layers) != len(new_layers):
+    raise ValueError(f"Base model has {len(pretrained_layers)} weighted layers, the new model {len(new_layers)}")
+  for pretrained_layer, new_layer in zip(pretrained_layers[:-1], new_layers[:-1]):
+    new_layer.set_weights(pretrained_layer.get_weights())
 
   # 5. Clean up the temporary pretrained model from memory
   del pretrained_model

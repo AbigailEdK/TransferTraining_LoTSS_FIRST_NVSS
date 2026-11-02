@@ -20,7 +20,12 @@ from paths import RESULTSDIRECTORY
 # region FUNCTIONS
 def load_history(path):
     history = np.load(path, allow_pickle=True)
-    return history.item() if isinstance(history, np.ndarray) and history.shape == () else history
+    history = history.item() if isinstance(history, np.ndarray) and history.shape == () else history
+    # > Runs that log the cross-entropy without the L2 penalty ("crossentropy") are ranked on it, since Keras adds the penalty to
+    #   val_loss; older runs fall back to val_loss
+    if isinstance(history, dict) and "val_crossentropy" in history:
+        history = {**history, "loss": history["crossentropy"], "val_loss": history["val_crossentropy"]}
+    return history
 
 def summarise_stage(stage, experiment_number=0):
     '''
@@ -45,7 +50,11 @@ def summarise_stage(stage, experiment_number=0):
     for folder in sorted(training_dir.iterdir()):
         if not folder.is_dir():
             continue
-        parameters = process.extract_parameters_from_folder_name(folder.name)
+        try:
+            parameters = process.extract_parameters_from_folder_name(folder.name)
+        except ValueError:
+            print(f"Skipping '{folder.name}': not a results folder in the current naming format (e.g. from an older run).")
+            continue
         if parameters["base_model"] != "NONE":
             continue
 
